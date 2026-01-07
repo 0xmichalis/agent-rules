@@ -9,6 +9,7 @@
   simply delete the code.
 * When providing a solution, give me a score on a scale of 1-10 about how
   confident you are in the solution.
+* If available, use `bd` for task tracking.
 
 ## GitHub Guidelines
 
