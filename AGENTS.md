@@ -2,7 +2,6 @@
 
 ## General Guidelines
 
-* Add general rules that apply across all projects here.
 * Never remove comments unless the code you update renders the comment
   invalid.
 * Never refactor or rename code unless you are explicitly being told so.

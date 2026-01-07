@@ -3,7 +3,7 @@
 Guidelines for Rust development. Most of these rules are based on
 [Canonical's Rust Best Practices](https://canonical.github.io/rust-best-practices/).
 
-## 1. Cosmetic Discipline
+## Cosmetic Discipline
 
 * Use blank lines semantically, rather than aesthetically. They should be used
   consistently, regardless of the size of a section of code, to delimit strongly
@@ -39,7 +39,7 @@ Guidelines for Rust development. Most of these rules are based on
   Avoid adding empty blocks or meaningless comments just to satisfy this rule;
   only apply it when it genuinely improves readability without introducing noise.
 
-## 2. Naming Discipline
+## Naming Discipline
 
 * Follow Rust naming conventions:
   * `snake_case` for functions, variables, and modules
@@ -52,7 +52,7 @@ Guidelines for Rust development. Most of these rules are based on
   phrases for types (`User`, `Total`)
 * Use type aliases to improve readability when dealing with complex types
 
-## 3. Import Discipline
+## Import Discipline
 
 * Group imports logically: standard library, external crates, internal modules
 * Order imports alphabetically within each group
@@ -64,7 +64,7 @@ Guidelines for Rust development. Most of these rules are based on
 * Use `pub use` sparingly and only when re-exporting is necessary for the
   public API
 
-## 4. Pattern Matching Discipline
+## Pattern Matching Discipline
 
 * Always handle all possible cases in `match` statements—be exhaustive
 * Use `_` placeholder only when you genuinely don't care about the value
@@ -79,7 +79,7 @@ Guidelines for Rust development. Most of these rules are based on
 * Prefer `match` over multiple `if-else` chains for better exhaustiveness
   checking
 
-## 5. Code Discipline
+## Code Discipline
 
 * Keep functions focused on a single responsibility
 * Prefer composition over complex nested logic
@@ -93,7 +93,7 @@ Guidelines for Rust development. Most of these rules are based on
   when appropriate
 * Prefer `Option` and `Result` types over `null`-like patterns
 
-## 6. Error and Panic Discipline
+## Error and Panic Discipline
 
 * Use `Result<T, E>` for recoverable errors, never panic for expected error conditions
 * Avoid `unwrap()` and `expect()` in production code—use proper error handling
@@ -104,7 +104,7 @@ Guidelines for Rust development. Most of these rules are based on
 * Document panicking conditions in function documentation when they exist
 * Consider using `Option` for cases where "not found" is a valid, expected state
 
-## 7. Function Discipline
+## Function Discipline
 
 * Keep functions short and focused—if a function exceeds ~50 lines, consider
   refactoring
@@ -119,7 +119,7 @@ Guidelines for Rust development. Most of these rules are based on
 * Use function overloading patterns (traits, generics) when appropriate, but
   don't over-engineer
 
-## 8. Ordering Discipline
+## Ordering Discipline
 
 * Order items in modules consistently:
   1. Module-level documentation
@@ -134,7 +134,7 @@ Guidelines for Rust development. Most of these rules are based on
 * Order trait implementations consistently (e.g., alphabetically by trait name)
 * Keep related code close together—don't scatter related functionality across files
 
-## 9. Unsafe Discipline
+## Unsafe Discipline
 
 * Minimize use of `unsafe` code—only use when absolutely necessary
 * Encapsulate `unsafe` code in safe abstractions with clear safety invariants
@@ -146,7 +146,7 @@ Guidelines for Rust development. Most of these rules are based on
 * Consider using `#![deny(unsafe_code)]` at the crate level if unsafe isn't needed
 * Review all `unsafe` code carefully—it's easy to introduce undefined behavior
 
-## 10. Structural Discipline
+## Structural Discipline
 
 * Use modules to organize code logically—don't put everything in one file
 * Keep related functionality together in the same module
@@ -159,7 +159,7 @@ Guidelines for Rust development. Most of these rules are based on
 * Structure tests in a `tests/` directory for integration tests, `#[cfg(test)]`
   modules for unit tests
 
-## 11. Comment Discipline
+## Comment Discipline
 
 * Use `///` for public API documentation—these appear in generated docs
 * Use `//` for inline comments explaining non-obvious code
@@ -171,7 +171,18 @@ Guidelines for Rust development. Most of these rules are based on
 * Mark `TODO`, `FIXME`, and `NOTE` comments clearly if they must remain
 * Use `#[doc(hidden)]` for items that are public but not part of the intended API
 
-## 12. Further Reading
+## SQL Best Practices
+
+* **sqlx**: Use `sqlx::query_as!` to validate queries at compile time. Parameterize
+  inputs with numbered parameters (e.g., `$1`, `$2`) to avoid SQL injection.
+* **Diesel**: Use Diesel's query builder API for compile-time query validation.
+  For raw SQL, use `diesel::sql_query` with `.bind()` for parameters (e.g., `$1`,
+  `$2` for PostgreSQL, `?` for SQLite) to avoid SQL injection.
+* Define reusable query constants with descriptive names at module scope.
+* Map database errors to appropriate HTTP status codes and log details for debugging.
+* Use transactions for multi-table operations that must stay consistent.
+
+## Further Reading
 
 * [Canonical's Rust Best Practices](https://canonical.github.io/rust-best-practices/)
   * The source for these guidelines
