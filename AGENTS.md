@@ -7,6 +7,8 @@
 * Never refactor or rename code unless you are explicitly being told so.
 * When removing code, do not add a comment to note the deletion of the code,
   simply delete the code.
+* Always try to use exact equality assertions instead of approximate comparisons
+  in tests.
 * When providing a solution, give me a score on a scale of 1-10 about how
   confident you are in the solution.
 * If available, use `bd` for task tracking.
