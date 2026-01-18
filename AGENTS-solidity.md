@@ -86,6 +86,29 @@ self-explanatory.
   [EIP-2612](https://eips.ethereum.org/EIPS/eip-2612) to avoid requiring
   the user to first `approve` our contract in the ERC20 contract.
 
+## Uniswap v4 Pool Initialization Pattern
+
+When initializing Uniswap v4 pools and adding initial liquidity,
+**always use `PoolInitializer_v4` with `Multicall_v4`** to atomically
+combine pool initialization and liquidity deposit in a single transaction.
+This prevents front-running attacks where an attacker could:
+
+1. Front-run pool initialization to set a manipulated `sqrtPriceX96`
+2. Front-run the initial liquidity deposit to extract value from LPs
+3. Execute swaps in empty pools to manipulate the price before liquidity is added
+
+**Required Pattern:**
+
+* Use `PositionManager.multicall()` to bundle `initializePool()` and
+  `modifyLiquidities()` calls
+* Always include slippage protection when adding initial liquidity
+* Never split pool initialization and initial deposit across separate
+  transactions
+
+**Reference:** OpenZeppelin Uniswap v4 Core Audit - Medium Severity:
+["Front-Running Pool's Initialization or Initial Deposit Can Lead to
+Draining Initial Liquidity"](https://www.openzeppelin.com/news/uniswap-v4-core-audit#medium-severity)
+
 ## Testing
 
 The following testing practices should be followed when writing unit
