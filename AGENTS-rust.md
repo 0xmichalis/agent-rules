@@ -170,6 +170,8 @@ Guidelines for Rust development. Most of these rules are based on
 * Use comments to explain "why" not "what"—the code should be self-explanatory
 * Mark `TODO`, `FIXME`, and `NOTE` comments clearly if they must remain
 * Use `#[doc(hidden)]` for items that are public but not part of the intended API
+* Always explain in a comment why dead code is marked with `dead_code` instead of
+  being removed
 
 ## SQL Best Practices
 
