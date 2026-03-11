@@ -33,6 +33,9 @@
 
 * **Do NOT** use `/pulls/comments/<id>/replies` — that endpoint does not exist
   and returns 404.
+* `gh pr edit` requires the `read:project` OAuth scope which may not be available.
+  Use the REST API instead:
+  `gh api repos/:owner/:repo/pulls/<pr_number> -X PATCH -f body="..." -f title="..."`
 * For quick inspection, you can pipe JSON through `jq`, for example:
   * `gh api repos/:owner/:repo/pulls/105/reviews | jq '.[].id, .[].user.login'`
   * `gh api repos/:owner/:repo/pulls/105/reviews/<review_id>/comments | jq '.[].body'`
