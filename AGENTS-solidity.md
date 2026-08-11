@@ -1,132 +1,103 @@
 # Solidity Code Guidelines
 
-Guidelines specific to blockchain development in Solidity.
+Opinions and gotchas for Solidity. General style (descriptive names, early
+exit, no redundant logic) is assumed — what follows is the part that isn't.
 
 ## Code Style
 
-* Always use named import syntax, don’t import full files. This restricts
-  what is being imported to just the named items, not everything in the
-  file. Importing full files can result in compiler errors about
-  duplicate definitions, especially as repos grow and have more
-  dependencies with overlapping names.
-* Use descriptive variable names.
-* Limit the number of active variables.
-* No redundant logic.
-* Related code should be placed near each other.
-* Exit early and avoid nested code as much as possible to reduce mental
-  load for code reviewers.
-* When writing an if/else clause, prefer putting the clause with most of
-  the code in the else part to keep the whole conditional more readable.
-  Avoid adding empty blocks or meaningless comments just to satisfy this rule;
-  only apply it when it genuinely improves readability without introducing noise.
+* Always use named import syntax; never import a whole file. As a repo
+  grows and picks up dependencies with overlapping names, whole-file
+  imports start producing duplicate-definition compiler errors.
+* When writing an if/else, put the clause with most of the code in the
+  `else` branch. Skip it when satisfying it would mean an empty block or a
+  filler comment — that noise costs more than the ordering gains.
 
 ### Interfaces
 
-Every contract MUST implement their corresponding interface that includes
-all externally callable functions, errors and events.
+Every contract MUST implement a corresponding interface covering all
+externally callable functions, errors and events.
 
-### NatSpec & Comments
+### NatSpec
 
-Interfaces should be the entrypoint for all contracts. When exploring a
-contract within the repository, the interface MUST contain all relevant
-information to understand the functionality of the contract in the form
-of NatSpec comments. This includes all externally callable functions,
-errors and events. The NatSpec documentation MUST be added to the
-functions, errors and events within the interface. This allows a reader
-to understand the functionality of a function before moving on to the
-implementation. The implementing functions MUST point to the NatSpec
-documentation in the interface using `@inheritdoc`. Internal and private
-functions shouldn't have NatSpec documentation except for `@dev`
-comments, whenever more context is needed. Additional comments within a
-function should only be used to give more context to more complex
-operations, otherwise the code should be kept readable and
-self-explanatory.
+The interface is the entrypoint for reading a contract, so it MUST carry
+everything needed to understand the contract as NatSpec on its functions,
+errors and events. A reader should never have to open the implementation to
+learn what a function does.
+
+* Implementations point back with `@inheritdoc`.
+* Internal and private functions get no NatSpec beyond a `@dev` comment
+  where extra context is genuinely needed.
+* Comments inside a function body are for complex operations only.
 
 ## Security
 
-* Follow CEI pattern (checks-effects-interactions) whenever possible.
-* Favor pull over push model, eg. when withdrawing funds, make each user
-  call the contract to withdraw their funds.
-* Paginate `for` loops to avoid DOS issues.
-* When interacting with ERC20 tokens, always use OpenZeppelin's
+* Follow CEI (checks-effects-interactions) wherever possible.
+* Favor pull over push — make each user call in to withdraw their funds.
+* Paginate `for` loops to avoid DOS.
+* Use OpenZeppelin's
   [`SafeERC20`](https://docs.openzeppelin.com/contracts/5.x/api/token/erc20#SafeERC20)
-  library.
-* Use caution when making external calls. This gives execution flow to external
-  program which could do anything. Mark untrusted calls with comments.
-* Use caution when rounding, eg, interest calculations can be disasterous
-  when done incorrectly.
+  for every ERC20 interaction.
+* External calls hand execution flow to a program that could do anything.
+  Mark untrusted calls with a comment.
+* Watch rounding direction — interest calculations get disastrous when it's
+  wrong.
 
-## Performance tricks
+### Uniswap v4 pool initialization
 
-* When implementing nonces to guarantee single use and avoid replay
-  attacks, use bitmap nonces instead of a naive `mapping (uint256 =>
-  bool)` as the gas cost for bitmaps tends to be cheaper.
-* When casting between array types of compatible types (`address[] vs
-  address payable[]`, `address[] vs interface[]`, `address[] vs
-  contract[]`, `uint160[] vs address[]`, `uint256[] vs bytes32[]`,
-  `uint256[N] vs bytes32[N]`, etc.), instead of the naive approach of
-  creating a new array and copying all items from the old array, assign
-  one array pointer to the other via `assembly { newArr := oldArr }`.
-  The same trick can be applied to compatible structs.
-* To shorten a dynamic memory array, do `assembly { mstore(arr, newSize)
-  }`, since the size is stored in the first slot in memory.
-* To shorten a static memory array, create a new static array with the
-  required size and simply `assembly { newArr := oldArr }`.
+Initializing a pool and seeding its liquidity in separate transactions
+lets an attacker front-run the gap to set a manipulated `sqrtPriceX96`,
+extract value from the initial LPs, or swap against the empty pool to move
+the price first.
 
-## Low level
+Bundle `initializePool()` and `modifyLiquidities()` through
+`PositionManager.multicall()` — `PoolInitializer_v4` with `Multicall_v4` —
+so both land atomically, and include slippage protection on the initial
+liquidity.
 
-* When dealing with revert bytes, never bubble up with
-  `revert(string(revertBytes))`; this is wrong as it re-encodes the
-  revert data as an `Error(string)` revert type. Instead do
-  `assembly { revert(add(revertBytes, 0x20), mload(revertBytes)) }`.
-
-## ERC20
-
-* If a contract needs to spend ERC20 tokens from a user, leverage
-  [EIP-2612](https://eips.ethereum.org/EIPS/eip-2612) to avoid requiring
-  the user to first `approve` our contract in the ERC20 contract.
-
-## Uniswap v4 Pool Initialization Pattern
-
-When initializing Uniswap v4 pools and adding initial liquidity,
-**always use `PoolInitializer_v4` with `Multicall_v4`** to atomically
-combine pool initialization and liquidity deposit in a single transaction.
-This prevents front-running attacks where an attacker could:
-
-1. Front-run pool initialization to set a manipulated `sqrtPriceX96`
-2. Front-run the initial liquidity deposit to extract value from LPs
-3. Execute swaps in empty pools to manipulate the price before liquidity is added
-
-**Required Pattern:**
-
-* Use `PositionManager.multicall()` to bundle `initializePool()` and
-  `modifyLiquidities()` calls
-* Always include slippage protection when adding initial liquidity
-* Never split pool initialization and initial deposit across separate
-  transactions
-
-**Reference:** OpenZeppelin Uniswap v4 Core Audit - Medium Severity:
+Reference: OpenZeppelin Uniswap v4 Core Audit, Medium Severity —
 ["Front-Running Pool's Initialization or Initial Deposit Can Lead to
 Draining Initial Liquidity"](https://www.openzeppelin.com/news/uniswap-v4-core-audit#medium-severity)
 
+## Performance tricks
+
+* Bitmap nonces are cheaper than a naive `mapping(uint256 => bool)` for
+  single-use / replay protection.
+* Casting between compatible array types (`address[]` vs
+  `address payable[]`, `address[]` vs `interface[]`, `uint160[]` vs
+  `address[]`, `uint256[]` vs `bytes32[]`, `uint256[N]` vs `bytes32[N]`, …)
+  doesn't need a new array and a copy loop — reassign the pointer with
+  `assembly { newArr := oldArr }`. Same trick works for compatible structs.
+* Shorten a dynamic memory array with `assembly { mstore(arr, newSize) }` —
+  the length lives in the first memory slot.
+* Shorten a static memory array by creating one of the required size and
+  doing `assembly { newArr := oldArr }`.
+
+## Low level
+
+Never bubble up revert data with `revert(string(revertBytes))` — that
+re-encodes it as an `Error(string)` revert. Use
+`assembly { revert(add(revertBytes, 0x20), mload(revertBytes)) }`.
+
+## ERC20
+
+If a contract needs to spend a user's ERC20 tokens, use
+[EIP-2612](https://eips.ethereum.org/EIPS/eip-2612) so the user doesn't
+have to send a separate `approve` first.
+
 ## Testing
 
-The following testing practices should be followed when writing unit
-tests for new code. All functions, lines and branches should be tested to
-result in 100% testing coverage. Fuzz parameters and conditions whenever
-possible. Extremes should be tested in dedicated edge case and corner
-case tests. Invariants should be tested in dedicated invariant tests.
-
-Differential testing should be used to compare assembly implementations
-with implementations in Solidity or testing alternative implementations
-against existing Solidity or non-Solidity code using ffi.
-
-New features must be merged with associated tests. Bug fixes should have
-a corresponding test that fails without the bug fix.
+* 100% coverage of functions, lines and branches on new code.
+* Fuzz parameters and conditions whenever possible.
+* Extremes go in dedicated edge case and corner case tests; invariants go
+  in dedicated invariant tests.
+* Use differential testing to compare an assembly implementation against a
+  Solidity one, or against a non-Solidity reference via ffi.
+* New features merge with their tests. A bug fix comes with a test that
+  fails without the fix.
 
 ## Further Reading
 
-Ensure to apply all guidelines outlined below on top of the above:
+Apply these on top of the above:
 
 * [Solidity style guide](https://docs.soliditylang.org/en/latest/style-guide.html)
 * [OpenZeppelin conventions](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/GUIDELINES.md#solidity-conventions)
