@@ -25,7 +25,7 @@ big a section is.
 ## Don't interleave unrelated code
 
 To a new reader, interleaving looks deliberate and they'll go hunting for a
-relationship that isn't there. Group strongly intradependent sections.
+relationship that isn't there. Group strongly interdependent sections.
 
 This bites hardest with closures. A closure bound to a variable halfway
 through a function, capturing nothing, used only at the end, forces the

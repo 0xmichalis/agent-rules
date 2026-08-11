@@ -60,6 +60,10 @@ Draining Initial Liquidity"](https://www.openzeppelin.com/news/uniswap-v4-core-a
 
 ## Performance tricks
 
+The assembly tricks below operate on **memory** only. Storage and calldata
+have different representations, so reassigning a pointer across them is
+not a cast — it's corruption.
+
 * Bitmap nonces are cheaper than a naive `mapping(uint256 => bool)` for
   single-use / replay protection.
 * Casting between compatible array types (`address[]` vs
@@ -67,8 +71,11 @@ Draining Initial Liquidity"](https://www.openzeppelin.com/news/uniswap-v4-core-a
   `address[]`, `uint256[]` vs `bytes32[]`, `uint256[N]` vs `bytes32[N]`, …)
   doesn't need a new array and a copy loop — reassign the pointer with
   `assembly { newArr := oldArr }`. Same trick works for compatible structs.
+  Only reassign when the layouts are identical and the target length is no
+  greater than the source allocation.
 * Shorten a dynamic memory array with `assembly { mstore(arr, newSize) }` —
-  the length lives in the first memory slot.
+  the length lives in the first memory slot. Shrinking only; growing reads
+  memory that was never allocated for the array.
 * Shorten a static memory array by creating one of the required size and
   doing `assembly { newArr := oldArr }`.
 

@@ -7,14 +7,19 @@ See [AGENTS-rust.md](./AGENTS-rust.md) for general Rust guidelines.
 
 ## Transaction limits
 
-* Compute: 200k units per transaction by default, up to 1.4M via
-  `set_compute_unit_limit()`
-  ([source](https://solana.com/developers/guides/advanced/how-to-optimize-compute))
-* Transaction size: 1232 bytes, to be increased to 4096 with
+* Compute: each non-builtin instruction is allocated 200,000 CUs by default
+  (builtins get 3,000). The transaction ceiling is 1,400,000 CUs, requested
+  with `set_compute_unit_limit()`
+  ([budget reference](https://solana.com/docs/core/fees/compute-budget))
+* Transaction size: 1232 bytes. The increase to 4096 rides on the v1
+  transaction format and is not active —
   [SIMD-0296](https://github.com/solana-foundation/solana-improvement-documents/pull/296)
-* Accounts: 128 unique accounts per transaction. CPI account info limit is
-  255 `AccountInfo` structs per call, duplicates allowed, with
-  [SIMD-0339](https://github.com/solana-foundation/solana-improvement-documents/pull/339)
+  is still in review
+* Account locks: `MAX_TX_ACCOUNT_LOCKS` is 128 per transaction
+* CPI: the SDK's `MAX_CPI_ACCOUNT_INFOS` is 128, matching the lock limit.
+  The runtime allows 255 with duplicates after
+  [SIMD-0339](https://github.com/solana-foundation/solana-improvement-documents/pull/339),
+  so budget against 128 unless you have checked the cluster
 
 ## Account Validation
 
@@ -118,9 +123,12 @@ and the lamports are non-zero.
 
 ## Arithmetic
 
-* Use `checked_add`, `checked_sub`, `checked_mul`, `checked_div`,
-  `checked_pow` for user-controlled or critical values — Solana rBPF has
-  integer overflow bugs. Handle the `Option`; never unwrap it.
+* Set `overflow-checks = true` on the release profile. Cargo disables it by
+  default, and programs ship in release mode, so `a + b` wraps silently.
+* Even with that set, use `checked_add`, `checked_sub`, `checked_mul`,
+  `checked_div`, `checked_pow` for user-controlled or critical values so
+  the overflow becomes an error you handle rather than a panic. Handle the
+  `Option`; never unwrap it.
 * Avoid `saturating_*` for critical calculations — silently clamping on
   overflow produces wrong numbers rather than an error.
 * Prefer `try_floor_u64()` over `try_round_u64()` when converting decimals;

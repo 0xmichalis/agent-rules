@@ -29,15 +29,23 @@ models](https://claude.com/blog/the-new-rules-of-context-engineering-for-claude-
 
 ## Usage
 
-Copy or symlink `AGENTS.md` into a project root. It indexes the topic files
-by name, so any agent that reads it can pull in the rest when relevant.
+Symlink `AGENTS.md` into a project root so it keeps resolving against this
+checkout:
+
+```bash
+ln -sfn ~/path/to/agent-rules/AGENTS.md /path/to/project/AGENTS.md
+```
+
+If you copy it instead, copy the whole set — `AGENTS.md` links to the topic
+files by relative path, and a lone copy leaves those links dangling.
 
 For Claude Code, install the skills once so topic rules load automatically
 by trigger instead of by `@` mention:
 
 ```bash
+mkdir -p ~/.claude/skills
 for s in .claude/skills/*/; do
-  ln -s "$PWD/$s" ~/.claude/skills/
+  ln -sfn "$PWD/${s%/}" ~/.claude/skills/
 done
 ```
 
