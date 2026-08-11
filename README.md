@@ -1,58 +1,75 @@
 # Agent Rules
 
-This repository contains project-specific guidelines for AI coding
-assistants. These guidelines help ensure consistent, high-quality code
-generation and maintainability across different programming languages and
-blockchain platforms.
+Guidelines for AI coding assistants, organized for progressive disclosure:
+a small root file that's always in context, and topic files that get loaded
+only when the work touches them.
 
-## About
+## Philosophy
 
-This project provides structured guidelines that AI coding assistants can
-follow when helping with software development. The guidelines cover best
-practices, coding standards, security considerations, and project-specific
-conventions for various technologies.
+These files hold opinions and gotchas — not language basics the model
+already knows and not anything a linter or compiler enforces. Rules stay
+prescriptive where mistakes are expensive (Solidity and Solana security)
+and give way to judgement everywhere else.
 
-## Project Structure
+The structure follows Anthropic's
+[The new rules of context engineering for Claude 5 generation
+models](https://claude.com/blog/the-new-rules-of-context-engineering-for-claude-5-generation-models).
 
-* [AGENTS.md](./AGENTS.md) - General guidelines and project overview
-* [AGENTS-rust.md](./AGENTS-rust.md) - Rust development best practices
-* [AGENTS-solana.md](./AGENTS-solana.md) - Solana blockchain development
-  guidelines
-* [AGENTS-solidity.md](./AGENTS-solidity.md) - Solidity smart contract
-  development guidelines
+## Structure
 
-## License
-
-This repository uses a dual licensing approach:
-
-### GPL v3.0 License
-
-The content in **AGENTS-rust.md** is based on [Canonical's Rust Best
-Practices](https://canonical.github.io/rust-best-practices/), which is
-licensed under the GNU General Public License v3.0 (GPL v3.0). As such, the
-Rust guidelines file (`AGENTS-rust.md`) is subject to the GPL v3.0 license
-terms.
-
-### MIT License
-
-All other files in this repository, including:
-
-* `AGENTS.md`
-* `AGENTS-solana.md`
-* `AGENTS-solidity.md`
-* `README.md`
-* Any other files not explicitly mentioned above
-
-are licensed under the MIT License.
+| File | Contents |
+| --- | --- |
+| [AGENTS.md](./AGENTS.md) | Always-loaded: communication, working agreement, verification, index |
+| [AGENTS-rust.md](./AGENTS-rust.md) | Rust conventions |
+| [AGENTS-solana.md](./AGENTS-solana.md) | Solana program security |
+| [AGENTS-solidity.md](./AGENTS-solidity.md) | Solidity contracts |
+| [AGENTS-sql.md](./AGENTS-sql.md) | Database index design |
+| [AGENTS-github.md](./AGENTS-github.md) | `gh` CLI recipes |
+| [.claude/skills/](./.claude/skills) | Trigger descriptions that load the topic files on demand |
 
 ## Usage
 
-These guidelines are intended to be used by AI coding assistants and
-developers to maintain consistent code quality and follow best practices.
-Feel free to use, modify, and distribute these guidelines according to their
-respective licenses.
+Symlink `AGENTS.md` into a project root so it keeps resolving against this
+checkout:
+
+```bash
+ln -sfn ~/path/to/agent-rules/AGENTS.md /path/to/project/AGENTS.md
+```
+
+If you copy it instead, copy the whole set — `AGENTS.md` links to the topic
+files by relative path, and a lone copy leaves those links dangling.
+
+For Claude Code, install the skills once so topic rules load automatically
+by trigger instead of by `@` mention:
+
+```bash
+mkdir -p ~/.claude/skills
+for s in .claude/skills/*/; do
+  ln -sfn "$PWD/${s%/}" ~/.claude/skills/
+done
+```
+
+Each skill reads its topic file from this checkout, so keep the repo where
+it is after linking.
+
+## License
+
+Dual-licensed.
+
+### GPL v3.0
+
+[AGENTS-rust.md](./AGENTS-rust.md) is derived from [Canonical's Rust Best
+Practices](https://canonical.github.io/rust-best-practices/) and is
+licensed under the GNU General Public License v3.0.
+
+### MIT
+
+Everything else — `AGENTS.md`, `AGENTS-github.md`, `AGENTS-solana.md`,
+`AGENTS-solidity.md`, `AGENTS-sql.md`, `.claude/skills/`, `README.md` — is
+licensed under the MIT License.
 
 ## Contributing
 
-Contributions are welcome! Please ensure that any contributions comply with
-the licensing terms of the respective files.
+Contributions are welcome. Please comply with the licensing terms of the
+respective files, and keep new rules to things that aren't obvious to a
+current-generation model.

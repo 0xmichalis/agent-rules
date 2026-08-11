@@ -1,203 +1,161 @@
 # Solana Code Guidelines
 
-Guidelines specific to Solana blockchain development in Rust.
+Security rules and hard limits for Solana programs. This is a high-stakes
+area, so it stays prescriptive — the constraints below are deliberate.
 
-## General Rust Guidelines
+See [AGENTS-rust.md](./AGENTS-rust.md) for general Rust guidelines.
 
-For comprehensive Rust best practices, refer to [AGENTS-rust.md](./AGENTS-rust.md).
+## Transaction limits
 
-## General Practices
+* Compute: each non-builtin instruction is allocated 200,000 CUs by default
+  (builtins get 3,000). The transaction ceiling is 1,400,000 CUs, requested
+  with `set_compute_unit_limit()`
+  ([budget reference](https://solana.com/docs/core/fees/compute-budget))
+* Transaction size: 1232 bytes. The increase to 4096 rides on the v1
+  transaction format and is not active —
+  [SIMD-0296](https://github.com/solana-foundation/solana-improvement-documents/pull/296)
+  is still in review
+* Account locks: `MAX_TX_ACCOUNT_LOCKS` is 128 per transaction
+* CPI: the SDK's `MAX_CPI_ACCOUNT_INFOS` is 128, matching the lock limit.
+  The runtime allows 255 with duplicates after
+  [SIMD-0339](https://github.com/solana-foundation/solana-improvement-documents/pull/339),
+  so budget against 128 unless you have checked the cluster
 
-* Use `anchor` framework conventions when working with Anchor programs
-* Use `Pubkey` type from `solana_program` for public keys
-* Follow Solana's account ownership model - programs own accounts they create
-* Use `SystemProgram` for creating accounts when appropriate
-* Understand Solana transaction limits:
-  * Compute limit: 200k compute units per transaction (default), up to 1.4M
-    maximum using `set_compute_unit_limit()` ([source](https://solana.com/developers/guides/advanced/how-to-optimize-compute))
-  * Transaction size limit: 1232 bytes (to be increased to 4096 bytes with
-    [SIMD-0296](https://github.com/solana-foundation/solana-improvement-documents/pull/296))
-  * Accounts limit: 128 unique accounts per transaction (transaction's account
-    array). CPI account info limit: 255 AccountInfo structs per CPI call (can
-    reference same accounts multiple times, allowing duplicates) with
-    [SIMD-0339](https://github.com/solana-foundation/solana-improvement-documents/pull/339)
+## Account Validation
 
-## Security Best Practices
-
-### Account Validation
-
-* Always verify account ownership - check `account.owner == expected_program`.
-  Anchor's `Account<'info, T>` wrapper automatically validates ownership for
-  accounts owned by your program. When using accounts from other programs (e.g.,
-  SPL Token accounts), manually validate ownership with a constraint:
+* Verify ownership — `account.owner == expected_program`. Anchor's
+  `Account<'info, T>` does this for accounts your program owns. For
+  accounts from other programs (SPL Token, etc.) add the constraint
+  yourself:
   `#[account(constraint = acc.to_account_info().owner == &expected_program::ID)]`
-* Validate account discriminators to prevent type cosplay attacks where attacker
-  substitutes different account types with matching data layouts:
-  * Use Anchor's `Account<'info, T>` wrapper which automatically validates
-    discriminators and ownership
-  * Use `#[account]` macro on account structs for automatic discriminator
-    validation
-  * When using raw `AccountInfo<'info>` (for non-Anchor accounts like SPL
-    tokens, system accounts), manually validate ownership, data length, and
-    deserialize correctly - `AccountInfo` provides no automatic validation
-* Check that data is deserialized correctly - assert version matches expected
-  format
-* Assert global programs are correct (e.g., SPL Token program) when
-  interacting with them - use `Program<'info, T>` wrapper in Anchor
-* Verify account mutability matches expectations - check `is_writable` flag
-* Validate account data length before deserialization to prevent out-of-bounds
-  access
-* Always verify signer requirements:
-  * Use Anchor's `#[account(signer)]` constraint to enforce signer requirements
-  * When using `AccountInfo`, manually check `is_signer` flag for accounts
-    that must sign transactions
-* Prevent duplicate mutable accounts - when instruction takes multiple
-  accounts of same type, add constraint `user_a.key() != user_b.key()` to
-  prevent same account being passed twice
-* Never trust account data without validation - validate before use
-* Always validate all input accounts - never accept accounts without proper
-  validation, especially in CPI scenarios. Establish a root of trust by
-  validating the entire account chain
-* When using `UncheckedAccount`, always document why validation is not needed
-  with `/// CHECK` comments - Anchor requires this documentation. Be extremely
-  cautious with `UncheckedAccount` and `AccountInfo` as they bypass Anchor's
-  automatic validation
-* Validate unmodified, reference-only accounts - even accounts that are only
-  read and not modified must be validated to prevent substitution attacks
+* Validate discriminators to prevent type cosplay, where an attacker
+  substitutes a different account type with a matching data layout.
+  `Account<'info, T>` and the `#[account]` macro handle this. Raw
+  `AccountInfo<'info>` validates nothing — check ownership, data length and
+  deserialization by hand.
+* Assert the deserialized version matches the expected format.
+* Assert global programs (e.g. SPL Token) are the real ones — use
+  `Program<'info, T>`.
+* Check `is_writable` matches what the instruction assumes.
+* Validate data length before deserializing to prevent out-of-bounds reads.
+* Enforce signers with `#[account(signer)]`, or check `is_signer` manually
+  when using `AccountInfo`.
+* When an instruction takes several accounts of the same type, constrain
+  `user_a.key() != user_b.key()` so the same account can't be passed twice.
+* Validate every input account, including read-only ones — reference-only
+  accounts are still substitutable. In CPI scenarios validate the whole
+  account chain to establish a root of trust.
+* `UncheckedAccount` and `AccountInfo` bypass Anchor's validation entirely.
+  Use them rarely, and document why validation is unnecessary in the
+  `/// CHECK` comment Anchor requires.
 
-### Anchor Constraints and Account Initialization
+## Anchor Constraints and Initialization
 
-* Prefer Anchor constraints (`#[account(...)]`) over manual validation when
-  possible - they're enforced at the framework level and reduce boilerplate
-* Use `#[account(has_one = ...)]` for account relationship validation
-* Use `#[account(init)]` which prevents reinitialization attacks - the
-  discriminator check ensures already-initialized accounts cannot be
-  reinitialized. Automatically ensures rent exemption during account creation
-* Use `#[account(init_if_needed)]` with caution - ensure the account state
-  is valid for both new and existing accounts
-* Be careful with zero initialization patterns - ensure proper initialization
-  of account data. The difference between `#[account(zero)]` and proper
-  initialization can lead to vulnerabilities if not handled correctly
-* For manual account creation, ensure rent exemption by checking
-  `account.lamports() >= Rent::get()?.minimum_balance(account.data_len())`
-* Validate account state transitions are valid before mutating account data
-* Never mutate account data without proper authorization checks
+* Prefer `#[account(...)]` constraints over manual validation — enforced at
+  the framework level, less boilerplate to get wrong.
+* `#[account(has_one = ...)]` for relationship validation.
+* `#[account(init)]` prevents reinitialization via the discriminator check
+  and ensures rent exemption on creation.
+* `#[account(init_if_needed)]` needs care — the state must be valid for
+  both the new and the existing account.
+* `#[account(zero)]` is not the same as proper initialization; the gap
+  between them is exploitable.
+* For manual creation, check
+  `account.lamports() >= Rent::get()?.minimum_balance(account.data_len())`.
+* Validate that a state transition is legal before mutating account data,
+  and never mutate without an authorization check.
 
-### Account Closing
+## Account Closing
 
-* Use caution when closing accounts - closing releases lamports and is good
-  hygiene. Account data remains until end of transaction - subsequent instructions
-  referencing the soon-to-be-deleted account can have undefined behavior. An
-  account could be credited with more lamports during the same transaction,
-  cancelling the deletion
-* When checking if an account should be closed, verify both that data is
-  non-zero and lamports is non-zero
-* Critical flaw: If you close an account, zero the data, and a subsequent
-  instruction refunds the rent, the account remains with wiped data - an
-  attacker can re-initialize the same account with different data. Anchor
-  automatically prevents this by replacing the account discriminator with a
-  special "is closed" discriminator, causing all subsequent deserializations
-  to fail. For manual account closing, ensure proper sequencing or use
-  discriminator checks to prevent reinitialization.
+Closing an account releases lamports and is good hygiene, but the data
+survives until the end of the transaction — a later instruction referencing
+the closed account has undefined behavior, and a credit of lamports in the
+same transaction cancels the deletion.
 
-### Account Design
+The critical flaw: close an account, zero the data, then have a subsequent
+instruction refund the rent, and the account survives with wiped data for
+an attacker to re-initialize with their own. Anchor prevents this by
+writing a special "closed" discriminator so all later deserializations
+fail. Closing manually means sequencing it yourself or adding your own
+discriminator check.
 
-* Implement balance isolation when possible - never mix funds belonging to one
-  user with funds belonging to another user in the same account. If there's a
-  bug in calculating withdrawals, it's less likely to affect the entire pool
-  deposit
-* Use "gulping" pattern when possible - instead of tracking balances with
-  separate bookkeeping variables, use token accounts and mints to transfer back
-  and forth between vaults. It's more expensive but more robust - the token
-  account is the source of truth
+When deciding whether an account should be closed, check that both the data
+and the lamports are non-zero.
 
-### PDA (Program Derived Address) Security
+## Account Design
 
-* Always re-derive and validate PDAs - never accept client-provided PDAs
-  without verification
-* Use Anchor's `#[account(seeds = [...], bump)]` constraints for automatic
-  PDA validation
-* Store bump seed in account data and use `bump = account.bump` for efficient
-  verification in subsequent instructions - this significantly reduces compute
-  usage compared to using `find_program_address` which must search for the bump
-  (use `create_program_address` with stored bump instead)
-* When deriving manually, use canonical bump from `find_program_address` -
-  non-canonical bumps can lead to multiple valid PDAs for same seeds
-* Ensure PDA seeds are deterministic and cannot be manipulated by users
-* Prevent PDA sharing attacks - use unique seeds per user/context (e.g.,
-  include user pubkey in seeds) to ensure each user gets distinct PDA. Common
-  issue: program-controlled, user-specific vaults holding deposits must have
-  PDA authority unique to that user - never share PDAs across authority domains
-* Verify PDA derivation matches expected seeds in all cases
-* Use `has_one` constraints to validate PDA relationships with other accounts
+* Isolate balances — never mix one user's funds with another's in the same
+  account. A withdrawal-math bug then can't drain the whole pool.
+* Prefer "gulping": move value between token accounts and mints instead of
+  tracking it in bookkeeping variables. More expensive, but the token
+  account is the source of truth.
 
-### Cross-Program Invocation (CPI) Security
+## PDA Security
 
-* Always validate program IDs when doing CPI - use Anchor's `Program<'info, T>`
-  wrapper which validates the program ID automatically
-* Always validate account ownership when using accounts from other programs in
-  CPI - this is especially critical in CPI scenarios (see Account Validation
-  section for details)
-* Never pass arbitrary program accounts to CPI without validation - attacker
-  could substitute with a malicious program
-* When using `invoke_signed`, ensure signer seeds are correct and cannot be
-  manipulated
-* Validate all accounts passed to CPI are the expected accounts
-* Be aware of reentrancy risks - external program could call back into your
-  program during CPI. Consider state machine design that prevents reentrancy
-  or validates state consistency after CPI calls
-* When chaining delegations of signature verifications, ensure the chain
-  leads to proper verification - validate each step in the delegation chain
-* Establish a root of trust - validate the entire chain of accounts and
-  programs from a trusted source rather than accepting intermediate results
-  without verification
+* Always re-derive and validate PDAs. Never accept a client-provided PDA.
+* Use `#[account(seeds = [...], bump)]` for automatic validation.
+* Store the bump in account data and verify with `bump = account.bump`
+  (`create_program_address`) instead of re-running
+  `find_program_address`, which has to search for it — the compute saving
+  is significant.
+* When deriving manually, use the canonical bump from
+  `find_program_address`; non-canonical bumps yield multiple valid PDAs for
+  the same seeds.
+* Seeds must be deterministic and not user-manipulable.
+* Prevent PDA sharing — include the user pubkey (or equivalent) in the
+  seeds so each user gets a distinct PDA. Program-controlled, user-specific
+  vaults must never share a PDA authority across authority domains.
+* Use `has_one` to validate PDA relationships with other accounts.
 
-### Arithmetic Operations
+## CPI Security
 
-* Always use checked arithmetic for user-controlled or critical values - be
-  aware of integer overflow bugs in Solana rBPF:
-  * Use `checked_add()`, `checked_sub()`, `checked_mul()`, `checked_div()`,
-    `checked_pow()` instead of `+`, `-`, `*`, `/`, `pow()`
-  * Handle `Option` results with proper error handling - never unwrap
-* Avoid `saturating_*` methods for critical calculations - they silently
-  saturate on overflow/underflow leading to incorrect results
-* Use `try_floor_u64()` instead of `try_round_u64()` when converting decimals
-  to prevent precision loss that can enable arbitrage attacks. Rounding errors
-  can accumulate and lead to significant vulnerabilities - when in doubt, use
-  `floor` (or `ceil` depending on direction) instead of `round`
+* Validate program IDs with `Program<'info, T>`. Never pass an arbitrary
+  program account into a CPI — an attacker can substitute a malicious one.
+* Validate ownership of accounts coming from other programs; this matters
+  most in CPI.
+* With `invoke_signed`, make sure signer seeds are correct and not
+  manipulable.
+* The callee can call back into your program. Design state machines that
+  prevent reentrancy, or re-validate state consistency after the CPI
+  returns.
+* When chaining delegations of signature verification, validate every step
+  of the chain rather than trusting an intermediate result.
 
-### Error Handling
+## Arithmetic
 
-* Return appropriate `ProgramError` types for security violations - never
-  silently fail
-* Use Anchor's error types (`AnchorError`) when working with Anchor programs
-* Provide clear error messages for debugging
+* Set `overflow-checks = true` on the release profile. Cargo disables it by
+  default, and programs ship in release mode, so `a + b` wraps silently.
+* Even with that set, use `checked_add`, `checked_sub`, `checked_mul`,
+  `checked_div`, `checked_pow` for user-controlled or critical values so
+  the overflow becomes an error you handle rather than a panic. Handle the
+  `Option`; never unwrap it.
+* Avoid `saturating_*` for critical calculations — silently clamping on
+  overflow produces wrong numbers rather than an error.
+* Prefer `try_floor_u64()` over `try_round_u64()` when converting decimals;
+  rounding accumulates precision loss that enables arbitrage. When in
+  doubt, floor or ceil deliberately — never round.
 
 ## Testing
 
-* Write unit tests for program logic
-* Use `solana-program-test` for integration testing
-* Mock accounts and programs appropriately in tests
-* Test security edge cases:
-  * Invalid signers
-  * Incorrect PDA derivations
-  * Arithmetic overflow/underflow scenarios
-  * Invalid account ownership
-  * Missing account validations
-  * Duplicate mutable accounts
-  * Type cosplay attempts (wrong account types)
-  * Reinitialization attempts
-  * Arbitrary CPI with malicious programs
-  * Rent exemptions
-  * UncheckedAccount and AccountInfo validation bypasses
-  * Signature delegation chaining attacks
-  * Oracle manipulation scenarios
-  * Semantic inconsistency vulnerabilities
-  * Reentrancy through CPI
-  * Zero initialization edge cases
-  * Unmodified reference-only account substitution
-* Test with malicious inputs and edge cases
-* Verify all constraints are properly enforced in tests
+Beyond the usual unit and `solana-program-test` integration coverage, test
+the attacks:
+
+* Invalid signers
+* Incorrect PDA derivations
+* Arithmetic overflow/underflow
+* Invalid account ownership and missing validations
+* Duplicate mutable accounts
+* Type cosplay (wrong account types)
+* Reinitialization attempts
+* Arbitrary CPI with malicious programs
+* Rent exemption edge cases
+* `UncheckedAccount` / `AccountInfo` validation bypasses
+* Signature delegation chaining
+* Oracle manipulation
+* Semantic inconsistency
+* Reentrancy through CPI
+* Zero initialization
+* Substitution of unmodified, reference-only accounts
 
 ## Further Reading
 
