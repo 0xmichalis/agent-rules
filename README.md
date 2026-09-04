@@ -23,9 +23,9 @@ instructions, path-scoped rules, and task-triggered skills.
 | Path | Contents | Loaded |
 | --- | --- | --- |
 | [AGENTS.md](./AGENTS.md) | Communication, working agreement, verification, index | Always |
-| [.claude/rules/rust.md](./.claude/rules/rust.md) | Rust conventions | Touching `*.rs` |
-| [.claude/rules/solana.md](./.claude/rules/solana.md) | Solana program security | Touching `programs/**/*.rs` or `Anchor.toml` |
-| [.claude/rules/solidity.md](./.claude/rules/solidity.md) | Solidity contracts | Touching `*.sol` |
+| [.claude/rules/rust.md](./.claude/rules/rust.md) | Rust conventions | `**/*.rs` |
+| [.claude/rules/solana.md](./.claude/rules/solana.md) | Solana program security | `**/programs/**/*.rs`, `**/Anchor.toml` |
+| [.claude/rules/solidity.md](./.claude/rules/solidity.md) | Solidity contracts | `**/*.sol` |
 | [.claude/skills/sql-indexes](./.claude/skills/sql-indexes/SKILL.md) | Database index design | Index or slow-query work |
 | [.claude/skills/github-cli](./.claude/skills/github-cli/SKILL.md) | `gh` CLI recipes | Reading or responding on GitHub |
 
@@ -50,7 +50,8 @@ done
 Then import the root file from your user memory so it is always in context:
 
 ```bash
-echo "@$PWD/AGENTS.md" >> ~/.claude/CLAUDE.md
+grep -qxF "@$PWD/AGENTS.md" ~/.claude/CLAUDE.md 2>/dev/null \
+  || echo "@$PWD/AGENTS.md" >> ~/.claude/CLAUDE.md
 ```
 
 Each link points back into this checkout, so keep the repo where it is

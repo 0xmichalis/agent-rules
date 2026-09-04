@@ -47,7 +47,7 @@ Rules are tied to file types and load when you touch a matching file:
 | Rule | Files |
 | --- | --- |
 | [rust.md](./.claude/rules/rust.md) | `**/*.rs` |
-| [solana.md](./.claude/rules/solana.md) | `**/programs/**/*.rs`, `Anchor.toml` |
+| [solana.md](./.claude/rules/solana.md) | `**/programs/**/*.rs`, `**/Anchor.toml` |
 | [solidity.md](./.claude/rules/solidity.md) | `**/*.sol` |
 
 Skills are tied to a task rather than a file:
