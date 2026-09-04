@@ -1,9 +1,15 @@
+---
+paths:
+  - "**/programs/**/*.rs"
+  - "**/Anchor.toml"
+---
+
 # Solana Code Guidelines
 
 Security rules and hard limits for Solana programs. This is a high-stakes
 area, so it stays prescriptive — the constraints below are deliberate.
 
-See [AGENTS-rust.md](./AGENTS-rust.md) for general Rust guidelines.
+See [rust.md](./rust.md) for general Rust guidelines.
 
 ## Transaction limits
 
