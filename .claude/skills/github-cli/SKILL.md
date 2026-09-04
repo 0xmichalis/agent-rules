@@ -16,17 +16,21 @@ in angle brackets is a placeholder you substitute before running.
 * When a GitHub link isn't reachable by web search, fetch it with `gh`.
 * `gh issue view <id> --comments` — always read the comments, not just the
   issue body.
-* Reviews on a PR: `gh api repos/{owner}/{repo}/pulls/<pr>/reviews`
+* Reviews on a PR:
+  `gh api --paginate repos/{owner}/{repo}/pulls/<pr>/reviews`
 * Comments within one review:
-  `gh api repos/{owner}/{repo}/pulls/<pr>/reviews/<review_id>/comments`
+  `gh api --paginate repos/{owner}/{repo}/pulls/<pr>/reviews/<review_id>/comments`
 * All inline review comments on a PR:
-  `gh api repos/{owner}/{repo}/pulls/<pr>/comments`
+  `gh api --paginate repos/{owner}/{repo}/pulls/<pr>/comments`
+
+List endpoints return 30 items per page; without `--paginate` a busy PR
+silently loses comments.
 
 Pipe through `jq` to keep the output small:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<pr>/reviews | jq '.[].id, .[].user.login'
-gh api repos/{owner}/{repo}/pulls/<pr>/comments | jq '.[].id, .[].body'
+gh api --paginate repos/{owner}/{repo}/pulls/<pr>/reviews | jq '.[].id, .[].user.login'
+gh api --paginate repos/{owner}/{repo}/pulls/<pr>/comments | jq '.[].id, .[].body'
 ```
 
 ## Writing
