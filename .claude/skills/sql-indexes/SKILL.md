@@ -10,9 +10,11 @@ when creating, modifying, or auditing indexes in PostgreSQL, MySQL, or SQL Serve
 
 ## Index Design Rules
 
-* Always check the query plan first — run EXPLAIN / EXPLAIN ANALYZE before
-  reaching for CREATE INDEX. Identify whether the bottleneck is a full table
-  scan, excessive bookmark lookups, or an on-disk sort.
+* Always check the query plan first — `EXPLAIN` / `EXPLAIN ANALYZE` on
+  Postgres and MySQL, `SET SHOWPLAN_XML ON` or `SET STATISTICS XML ON` on
+  SQL Server — before reaching for CREATE INDEX. Identify whether the
+  bottleneck is a full table scan, excessive bookmark lookups, or an on-disk
+  sort.
 * Equality columns first, range columns last in composite indexes. Equality
   filters let the B-tree jump to a precise group; range filters (>, <, BETWEEN)
   start a leaf scan that trailing columns can't narrow.
@@ -32,9 +34,10 @@ when creating, modifying, or auditing indexes in PostgreSQL, MySQL, or SQL Serve
 * Use INCLUDE columns instead of widening the sort key — Postgres and SQL
   Server let you attach payload columns to leaf nodes without changing the
   B-tree's sort structure. Cover the query without redesigning the index.
-* Don't over-widen covering indexes — a covering index with 8+ columns doubles
-  the index size on disk and in memory. Only worth it for specific
-  high-frequency queries, not as a general policy.
+* Don't over-widen covering indexes — every added column widens every leaf
+  entry, on disk and in the buffer pool. Measure the index size against the
+  table before shipping. Only worth it for specific high-frequency queries,
+  not as a general policy.
 
 ## Anti-Pattern Rules
 
