@@ -1,3 +1,8 @@
+---
+paths:
+  - "**/*.sol"
+---
+
 # Solidity Code Guidelines
 
 Opinions and gotchas for Solidity. General style (descriptive names, early

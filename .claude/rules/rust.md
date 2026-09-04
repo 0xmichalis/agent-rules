@@ -1,3 +1,8 @@
+---
+paths:
+  - "**/*.rs"
+---
+
 # Rust Code Guidelines
 
 Opinions and gotchas for Rust work. Naming conventions, import ordering,
@@ -58,7 +63,8 @@ being kept rather than deleted.
 * Multi-table writes that must stay consistent belong in a transaction.
 * Map database errors onto HTTP status codes and log the underlying detail.
 
-See [AGENTS-sql.md](./AGENTS-sql.md) before adding or changing an index.
+See the [sql-indexes skill](../skills/sql-indexes/SKILL.md) before adding or
+changing an index.
 
 ## Further Reading
 

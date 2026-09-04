@@ -23,6 +23,8 @@ When you propose a solution, rate your confidence in it 1-10.
   Don't leave a tombstone comment where you deleted code.
 * Surface confusion before writing code, not after. If two readings of the
   request lead to different work, ask.
+* Never mention the model or tool that wrote the code in commit messages or
+  PR descriptions.
 
 ## Verification
 
@@ -40,13 +42,20 @@ comments inside bash commands you execute.
 These hold gotchas and opinions, not language basics. Load the one that
 matches the work; ignore the rest.
 
-| Rules | Load when |
-| --- | --- |
-| [AGENTS-rust.md](./AGENTS-rust.md) | Writing or reviewing Rust |
-| [AGENTS-solana.md](./AGENTS-solana.md) | Solana programs, Anchor, CPI, PDAs |
-| [AGENTS-solidity.md](./AGENTS-solidity.md) | Solidity contracts, EVM, gas |
-| [AGENTS-sql.md](./AGENTS-sql.md) | Designing or auditing database indexes |
-| [AGENTS-github.md](./AGENTS-github.md) | Driving GitHub through `gh` |
+Rules are tied to file types and load when you touch a matching file:
 
-Claude Code loads these automatically through the skills in
-[.claude/skills](./.claude/skills) — no `@` mention needed.
+| Rule | Files |
+| --- | --- |
+| [rust.md](./.claude/rules/rust.md) | `**/*.rs` |
+| [solana.md](./.claude/rules/solana.md) | `**/programs/**/*.rs`, `Anchor.toml` |
+| [solidity.md](./.claude/rules/solidity.md) | `**/*.sol` |
+
+Skills are tied to a task rather than a file:
+
+| Skill | Load when |
+| --- | --- |
+| [sql-indexes](./.claude/skills/sql-indexes/SKILL.md) | Designing or auditing database indexes, diagnosing a slow query |
+| [github-cli](./.claude/skills/github-cli/SKILL.md) | Driving GitHub through `gh` |
+
+Claude Code loads both automatically once installed as described in the
+[README](./README.md) — no `@` mention needed.
