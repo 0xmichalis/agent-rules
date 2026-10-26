@@ -12,12 +12,13 @@
   including boundaries and failure paths, at the lowest useful tier. Run the
   relevant checks; state what could not be verified. Don't invent tests for
   harmless documentation edits.
-* Implement in an isolated feature worktree from the correct fresh base; prefer
-  Orca-managed worktrees in Orca. Preserve the user's checkout, local work and
-  commit signing. Read-only reviews need no checkout change.
+* Start changes in a new worktree and feature branch, never on the repository's
+  default branch. Fetch the correct base first; prefer Orca-managed worktrees
+  in Orca. Preserve local work and commit signing. Read-only reviews need no
+  checkout change.
 * Finish features and fixes with verified commits, a push and a PR. Analysis
   returns findings; an explicit local-only request stays local. Check available
-  CI and review feedback before handing off, without fixed polling delays.
+  CI and review feedback before handing off.
 * Post requested PR reviews inline and choose COMMENT, APPROVE or REQUEST_CHANGES
   from verified findings. Reply to addressed feedback, including declines, and
   resolve completed threads. Omit AI attribution unless the project requires it;

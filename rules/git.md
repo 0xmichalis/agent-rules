@@ -1,8 +1,7 @@
 # Git and pull requests
 
-* Use the repository's integration branch, which may differ from its default
-  branch. Fetch before starting; avoid merging unrelated promotion history just
-  to obtain one required fix.
+* Start changes in a new worktree and feature branch, never on the repository's
+  default branch. Fetch before starting and use the intended PR base.
 * Never move or delete a branch held by another worktree. Stage relevant files
   explicitly, retain signing and avoid direct pushes to protected branches.
 * Keep meaningful commits self-contained. Fold corrections into their owning
@@ -14,11 +13,11 @@
 * Review the current PR head, not an assumed matching local checkout. Back
   substantive findings with code evidence or a focused reproduction. Check
   relevant CI before approving; obey platform self-review restrictions.
-* Approvals have an empty body. Post non-blocking notes separately. Reply in
-  each addressed thread and resolve completed work; avoid duplicate replies.
+* Leave approval summaries empty by default; put non-blocking notes inline.
+  Reply in each addressed thread and resolve completed work; avoid duplicate
+  replies.
 * Check available review comments and CI before handoff and address actionable
-  feedback. Do not idle for arbitrary 5/30-minute timers or promise unattended
-  monitoring without an actual continuation mechanism.
+  feedback.
 * After an owned PR update, fast-forward a matching user checkout only when its
   state permits it; stop on divergence. Never reset or stash the user's work to
   force synchronization.
