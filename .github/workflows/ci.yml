@@ -12,6 +12,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check installation and rollback
+        run: python3 -m unittest discover -s tests -v
+
       - name: Lint Markdown
         uses: DavidAnson/markdownlint-cli2-action@v20
         with:
