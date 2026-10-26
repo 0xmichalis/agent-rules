@@ -19,7 +19,7 @@ defaults in a managed section of its global `SOUL.md`:
 | --- | --- |
 | Codex | `~/.codex/AGENTS.md` |
 | Claude Code | `~/.claude/CLAUDE.md` |
-| Hermes | `~/.hermes/SOUL.md` (managed section) |
+| Hermes | `$HERMES_HOME/SOUL.md` or `~/.hermes/SOUL.md` (managed section) |
 
 Existing instructions and previous installations are backed up under
 `~/.agents/backups/agent-rules/`. A failed replacement attempts to restore every
@@ -30,10 +30,19 @@ the same content; removing the source worktree does not break installed rules.
 Claude's `~/.claude/rules/agent-rules` also points to the installed language rules,
 retaining their file-type filters. Any existing copy or link is backed up first.
 
-Hermes personality text outside the managed section is preserved. Existing
-profiles under `~/.hermes/profiles/` receive the defaults too; rerun after adding
-a profile. Hermes loads this content globally, independently of project
-instructions; see its [context-file documentation](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files).
+Hermes personality text outside the managed section is preserved. The installer
+honors `HERMES_HOME`; recognized profiles under that home's `profiles/` receive
+the defaults too. Bare directories, deleted profiles and directory symlinks are
+skipped. Rerun after adding a profile. Backups for a home outside your user home
+are stored under `hermes-home/` in the installation backup directory.
+
+`SOUL.md` applies to every Hermes session using that home, including TUI and
+gateway sessions; it is not specific to Orca. A remote gateway uses its own
+server-side home and needs installation there. See Hermes's
+[context-file documentation](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files).
+
+Upgrades archive the old OpenCode instruction link only if it points to this
+installer's shared defaults. Custom OpenCode files and links are preserved.
 
 Start a new agent session after installation. Orca's managed profiles may mirror
 these native files; verify the effective entry when using a custom account,

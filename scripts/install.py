@@ -2,7 +2,10 @@
 """Install a local rule snapshot and the native global instruction entry files."""
 
 from datetime import datetime, timezone
+import errno
 from pathlib import Path
+import os
+import re
 import shutil
 import sys
 import tempfile
@@ -12,6 +15,12 @@ RESOURCES = ("AGENTS.md", "README.md", "rules", ".claude/rules", ".claude/skills
 ENTRIES = (".codex/AGENTS.md", ".claude/CLAUDE.md")
 HERMES_START = "<!-- agent-rules:start -->"
 HERMES_END = "<!-- agent-rules:end -->"
+HERMES_PROFILE_FILES = ("config.yaml", ".env", "SOUL.md", "profile.yaml", "auth.json", "state.db")
+
+
+def hermes_home_path(home):
+    configured = os.environ.get("HERMES_HOME", "").strip()
+    return Path(configured).expanduser().resolve() if configured else home / ".hermes"
 
 
 def hermes_soul_content(existing, rules):
@@ -31,6 +40,15 @@ def remove(path):
         shutil.rmtree(path)
     else:
         path.unlink(missing_ok=True)
+
+
+def move_path(source, destination):
+    try:
+        source.rename(destination)
+    except OSError as error:
+        if error.errno != errno.EXDEV:
+            raise
+        shutil.move(str(source), str(destination))
 
 
 def install(source, home):
@@ -63,10 +81,18 @@ def install(source, home):
             link = stage / ("entry-" + str(index))
             link.symlink_to(target / "AGENTS.md")
             replacements.append((home / entry, link))
-        hermes_home = home / ".hermes"
+        legacy = home / ".config/opencode/AGENTS.md"
+        if legacy.is_symlink() and legacy.readlink() == target / "AGENTS.md":
+            replacements.append((legacy, None))
+        hermes_home = hermes_home_path(home)
         profiles = sorted(
             path for path in (hermes_home / "profiles").glob("*")
             if path.is_dir() and not path.is_symlink()
+            and path.name != "default"
+            and re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", path.name)
+            and not (path.parent / ".deleted" / path.name).exists()
+            and any((path / name).is_file() or (path / name).is_symlink()
+                    for name in HERMES_PROFILE_FILES)
         )
         rules = (payload / "AGENTS.md").read_text(encoding="utf-8")
         for index, profile in enumerate([hermes_home, *profiles]):
@@ -88,17 +114,22 @@ def install(source, home):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 saved = None
                 if destination.exists() or destination.is_symlink():
-                    saved = backup / destination.relative_to(home)
+                    if destination.is_relative_to(home):
+                        relative = destination.relative_to(home)
+                    else:
+                        relative = Path("hermes-home") / destination.relative_to(hermes_home)
+                    saved = backup / relative
                     saved.parent.mkdir(parents=True, exist_ok=True)
-                    destination.rename(saved)
+                    move_path(destination, saved)
                 replaced.append((destination, saved))
-                prepared.rename(destination)
+                if prepared is not None:
+                    move_path(prepared, destination)
         except Exception:
             for destination, saved in reversed(replaced):
                 try:
                     remove(destination)
                     if saved is not None:
-                        saved.rename(destination)
+                        move_path(saved, destination)
                 except Exception as rollback_error:
                     print(
                         f"Rollback failed for {destination}: {rollback_error}. "
@@ -114,6 +145,6 @@ if __name__ == "__main__":
     previous = install(checkout, Path.home())
     print("Installed shared rules from", checkout)
     print("Native entry files:", ", ".join(ENTRIES))
-    print("Hermes defaults: managed sections in ~/.hermes/SOUL.md and existing profiles")
+    print("Hermes defaults: managed sections in", hermes_home_path(Path.home()), "and existing profiles")
     if previous:
         print("Previous installation and instructions saved in", previous)

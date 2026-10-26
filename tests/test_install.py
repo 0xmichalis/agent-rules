@@ -1,6 +1,7 @@
 import importlib.util
 from contextlib import redirect_stderr
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -17,6 +18,9 @@ spec.loader.exec_module(installer)
 
 class InstallationTests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict(os.environ, {"HERMES_HOME": ""})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -80,6 +84,16 @@ class InstallationTests(unittest.TestCase):
         session.write_text('{"history": "preserve"}\n')
         empty_profile = self.home / ".hermes/profiles/other"
         empty_profile.mkdir()
+        (empty_profile / "config.yaml").write_text("{}\n")
+        ignored = self.home / ".hermes/profiles/logs"
+        ignored.mkdir()
+        (ignored / "agent.log").write_text("Keep the log\n")
+        deleted = self.home / ".hermes/profiles/deleted"
+        deleted.mkdir()
+        (deleted / "config.yaml").write_text("{}\n")
+        tombstones = self.home / ".hermes/profiles/.deleted"
+        tombstones.mkdir()
+        (tombstones / "deleted").touch()
         backup = installer.install(self.source, self.home)
         self.assertEqual(
             (backup / ".hermes/SOUL.md").read_text(),
@@ -98,15 +112,122 @@ class InstallationTests(unittest.TestCase):
             self.assertNotIn("# Shared rules\n", content)
             self.assertTrue(content.endswith(personality))
         self.assertEqual(session.read_text(), '{"history": "preserve"}\n')
+        self.assertFalse((ignored / "SOUL.md").exists())
+        self.assertFalse((deleted / "SOUL.md").exists())
+        self.assertEqual((ignored / "agent.log").read_text(), "Keep the log\n")
+
+    def test_custom_hermes_home_outside_user_home_has_updates_and_backups(self):
+        custom = self.root / "external Hermes home"
+        custom.mkdir()
+        (custom / "SOUL.md").write_text("# External personality\n")
+        profile = custom / "profiles/work"
+        profile.mkdir(parents=True)
+        (profile / "config.yaml").write_text("{}\n")
+        with patch.dict(os.environ, {"HERMES_HOME": str(custom)}):
+            backup = installer.install(self.source, self.home)
+            self.assertIn("# Shared rules\n", (custom / "SOUL.md").read_text())
+            self.assertIn("# Shared rules\n", (profile / "SOUL.md").read_text())
+            self.assertEqual(
+                (backup / "hermes-home/SOUL.md").read_text(),
+                "# External personality\n",
+            )
+            (self.source / "AGENTS.md").write_text("# Updated rules\n")
+            installer.install(self.source, self.home)
+        self.assertFalse((self.home / ".hermes").exists())
+        content = (custom / "SOUL.md").read_text()
+        self.assertIn("# Updated rules\n", content)
+        self.assertNotIn("# Shared rules\n", content)
+        self.assertTrue(content.endswith("# External personality\n"))
+        self.assertEqual((profile / "config.yaml").read_text(), "{}\n")
+
+    def test_custom_hermes_home_replacement_failure_restores_external_file(self):
+        custom = self.root / "external Hermes home"
+        custom.mkdir()
+        soul = custom / "SOUL.md"
+        soul.write_text("# External personality\n")
+        original = Path.rename
+        failed = False
+
+        def fail_custom_replacement(path, target):
+            nonlocal failed
+            if Path(target) == soul and not failed:
+                failed = True
+                raise OSError("Simulated external replacement failure")
+            return original(path, target)
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(custom)}):
+            with patch.object(Path, "rename", fail_custom_replacement):
+                with self.assertRaisesRegex(OSError, "Simulated external"):
+                    installer.install(self.source, self.home)
+        self.assertTrue(failed)
+        self.assertEqual(soul.read_text(), "# External personality\n")
+        self.assertFalse((self.home / ".agents/agent-rules").exists())
+
+    def test_upgrade_archives_only_the_owned_legacy_opencode_link(self):
+        legacy = self.home / ".config/opencode/AGENTS.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.symlink_to(self.home / ".agents/agent-rules/AGENTS.md")
+        settings = legacy.parent / "settings.json"
+        settings.write_text('{"keep": true}\n')
+        backup = installer.install(self.source, self.home)
+        self.assertFalse(legacy.is_symlink())
+        self.assertFalse(legacy.exists())
+        self.assertTrue((backup / ".config/opencode/AGENTS.md").is_symlink())
+        self.assertEqual(settings.read_text(), '{"keep": true}\n')
+        legacy.write_text("# Custom OpenCode preferences\n")
+        installer.install(self.source, self.home)
+        self.assertEqual(legacy.read_text(), "# Custom OpenCode preferences\n")
+        legacy.unlink()
+        custom = self.root / "custom-opencode.md"
+        custom.write_text("# User-owned rules\n")
+        legacy.symlink_to(custom)
+        installer.install(self.source, self.home)
+        self.assertEqual(legacy.resolve(), custom)
+        self.assertEqual(custom.read_text(), "# User-owned rules\n")
+
+    @unittest.skipUnless(os.access("/dev/shm", os.W_OK), "Needs another writable filesystem")
+    def test_external_hermes_home_on_another_filesystem_installs_and_rolls_back(self):
+        with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
+            custom = Path(directory)
+            if custom.stat().st_dev == self.home.stat().st_dev:
+                self.skipTest("Temporary homes share the same filesystem")
+            soul = custom / "SOUL.md"
+            soul.write_text("# External personality\n")
+            with patch.dict(os.environ, {"HERMES_HOME": str(custom)}):
+                backup = installer.install(self.source, self.home)
+                self.assertEqual(
+                    (backup / "hermes-home/SOUL.md").read_text(),
+                    "# External personality\n",
+                )
+                previous = soul.read_text()
+                self.assertIn("# Shared rules\n", previous)
+                (self.source / "AGENTS.md").write_text("# New rules\n")
+                original = Path.rename
+
+                def fail_after_hermes(path, target):
+                    if path.name == "scoped-rules":
+                        raise OSError("Simulated later replacement failure")
+                    return original(path, target)
+
+                with patch.object(Path, "rename", fail_after_hermes):
+                    with self.assertRaisesRegex(OSError, "Simulated later"):
+                        installer.install(self.source, self.home)
+            self.assertEqual(soul.read_text(), previous)
+            for entry in installer.ENTRIES:
+                self.assertEqual((self.home / entry).read_text(), "# Shared rules\n")
 
     def test_failed_hermes_update_restores_personality_and_previous_rules(self):
         soul = self.home / ".hermes/SOUL.md"
         profile = self.home / ".hermes/profiles/work"
         profile.mkdir(parents=True)
+        (profile / "config.yaml").write_text("{}\n")
         soul.write_text("# Personality\n")
         installer.install(self.source, self.home)
         previous_soul = soul.read_text()
         previous_profile = (profile / "SOUL.md").read_text()
+        legacy = self.home / ".config/opencode/AGENTS.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.symlink_to(self.home / ".agents/agent-rules/AGENTS.md")
         (self.source / "AGENTS.md").write_text("# New rules\n")
         original = Path.rename
         failed = False
@@ -124,6 +245,8 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(failed)
         self.assertEqual(soul.read_text(), previous_soul)
         self.assertEqual((profile / "SOUL.md").read_text(), previous_profile)
+        self.assertTrue(legacy.is_symlink())
+        self.assertEqual(legacy.read_text(), "# Shared rules\n")
         for entry in installer.ENTRIES:
             self.assertEqual((self.home / entry).read_text(), "# Shared rules\n")
 
