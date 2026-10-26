@@ -35,6 +35,10 @@ class InstallationTests(unittest.TestCase):
         shutil.rmtree(self.source)
         for entry in installer.ENTRIES:
             self.assertEqual((self.home / entry).read_text(), "# Shared rules\n")
+        self.assertIn(
+            "# Shared rules\n", (self.home / ".hermes/SOUL.md").read_text()
+        )
+        self.assertFalse((self.home / ".config/opencode").exists())
         self.assertFalse((self.home / ".agents/agent-rules/private-memory.md").exists())
         self.assertEqual(
             (self.home / ".claude/rules/agent-rules/rust.md").read_text(),
@@ -65,6 +69,75 @@ class InstallationTests(unittest.TestCase):
         for entry in installer.ENTRIES:
             self.assertEqual((self.home / entry).read_text(), "# Updated rules\n")
         self.assertEqual(context.read_text(), "# Private project mapping\n")
+
+    def test_hermes_updates_defaults_without_replacing_personality_or_profile_data(self):
+        soul = self.home / ".hermes/SOUL.md"
+        profile = self.home / ".hermes/profiles/work"
+        profile.mkdir(parents=True)
+        soul.write_text("# Personality\nKeep my preferred voice.\n")
+        (profile / "SOUL.md").write_text("# Work personality\nKeep the work voice.\n")
+        session = profile / "session.json"
+        session.write_text('{"history": "preserve"}\n')
+        empty_profile = self.home / ".hermes/profiles/other"
+        empty_profile.mkdir()
+        backup = installer.install(self.source, self.home)
+        self.assertEqual(
+            (backup / ".hermes/SOUL.md").read_text(),
+            "# Personality\nKeep my preferred voice.\n",
+        )
+        (self.source / "AGENTS.md").write_text("# Updated rules\n")
+        installer.install(self.source, self.home)
+        installer.install(self.source, self.home)
+        for path, personality in (
+            (soul, "# Personality\nKeep my preferred voice.\n"),
+            (profile / "SOUL.md", "# Work personality\nKeep the work voice.\n"),
+            (empty_profile / "SOUL.md", ""),
+        ):
+            content = path.read_text()
+            self.assertEqual(content.count("# Updated rules\n"), 1)
+            self.assertNotIn("# Shared rules\n", content)
+            self.assertTrue(content.endswith(personality))
+        self.assertEqual(session.read_text(), '{"history": "preserve"}\n')
+
+    def test_failed_hermes_update_restores_personality_and_previous_rules(self):
+        soul = self.home / ".hermes/SOUL.md"
+        profile = self.home / ".hermes/profiles/work"
+        profile.mkdir(parents=True)
+        soul.write_text("# Personality\n")
+        installer.install(self.source, self.home)
+        previous_soul = soul.read_text()
+        previous_profile = (profile / "SOUL.md").read_text()
+        (self.source / "AGENTS.md").write_text("# New rules\n")
+        original = Path.rename
+        failed = False
+
+        def fail_profile_replacement(path, target):
+            nonlocal failed
+            if Path(target) == profile / "SOUL.md" and not failed:
+                failed = True
+                raise OSError("Simulated profile replacement failure")
+            return original(path, target)
+
+        with patch.object(Path, "rename", fail_profile_replacement):
+            with self.assertRaisesRegex(OSError, "Simulated profile"):
+                installer.install(self.source, self.home)
+        self.assertTrue(failed)
+        self.assertEqual(soul.read_text(), previous_soul)
+        self.assertEqual((profile / "SOUL.md").read_text(), previous_profile)
+        for entry in installer.ENTRIES:
+            self.assertEqual((self.home / entry).read_text(), "# Shared rules\n")
+
+    def test_incomplete_hermes_section_does_not_overwrite_personality_or_installation(self):
+        installer.install(self.source, self.home)
+        soul = self.home / ".hermes/SOUL.md"
+        malformed = "# My personality\n<!-- agent-rules:start -->\nUnfinished edit\n"
+        soul.write_text(malformed)
+        (self.source / "AGENTS.md").write_text("# New rules\n")
+        with self.assertRaisesRegex(ValueError, "managed section"):
+            installer.install(self.source, self.home)
+        self.assertEqual(soul.read_text(), malformed)
+        for entry in installer.ENTRIES:
+            self.assertEqual((self.home / entry).read_text(), "# Shared rules\n")
 
     def test_failed_replacement_restores_working_installation(self):
         installer.install(self.source, self.home)

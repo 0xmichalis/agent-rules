@@ -9,7 +9,21 @@ import tempfile
 
 
 RESOURCES = ("AGENTS.md", "README.md", "rules", ".claude/rules", ".claude/skills")
-ENTRIES = (".codex/AGENTS.md", ".claude/CLAUDE.md", ".config/opencode/AGENTS.md")
+ENTRIES = (".codex/AGENTS.md", ".claude/CLAUDE.md")
+HERMES_START = "<!-- agent-rules:start -->"
+HERMES_END = "<!-- agent-rules:end -->"
+
+
+def hermes_soul_content(existing, rules):
+    section = f"{HERMES_START}\n{rules.rstrip()}\n{HERMES_END}"
+    if HERMES_START not in existing and HERMES_END not in existing:
+        return section + "\n\n" + existing
+    if existing.count(HERMES_START) != 1 or existing.count(HERMES_END) != 1:
+        raise ValueError("Invalid agent-rules managed section in Hermes SOUL.md")
+    start, end = existing.index(HERMES_START), existing.index(HERMES_END)
+    if end < start:
+        raise ValueError("Invalid agent-rules managed section in Hermes SOUL.md")
+    return existing[:start] + section + existing[end + len(HERMES_END):]
 
 
 def remove(path):
@@ -49,6 +63,22 @@ def install(source, home):
             link = stage / ("entry-" + str(index))
             link.symlink_to(target / "AGENTS.md")
             replacements.append((home / entry, link))
+        hermes_home = home / ".hermes"
+        profiles = sorted(
+            path for path in (hermes_home / "profiles").glob("*")
+            if path.is_dir() and not path.is_symlink()
+        )
+        rules = (payload / "AGENTS.md").read_text(encoding="utf-8")
+        for index, profile in enumerate([hermes_home, *profiles]):
+            soul = profile / "SOUL.md"
+            existing = soul.read_text(encoding="utf-8") if soul.exists() else ""
+            prepared = stage / ("hermes-soul-" + str(index))
+            prepared.write_text(hermes_soul_content(existing, rules), encoding="utf-8")
+            if soul.exists():
+                shutil.copymode(soul, prepared)
+            else:
+                prepared.chmod(0o600)
+            replacements.append((soul, prepared))
         if (payload / ".claude/rules").is_dir():
             link = stage / "scoped-rules"
             link.symlink_to(target / ".claude/rules", target_is_directory=True)
@@ -84,5 +114,6 @@ if __name__ == "__main__":
     previous = install(checkout, Path.home())
     print("Installed shared rules from", checkout)
     print("Native entry files:", ", ".join(ENTRIES))
+    print("Hermes defaults: managed sections in ~/.hermes/SOUL.md and existing profiles")
     if previous:
         print("Previous installation and instructions saved in", previous)

@@ -12,13 +12,14 @@ python3 scripts/install.py
 ```
 
 The installer puts a self-contained snapshot in `~/.agents/agent-rules/` and
-links each runner's native entry file to the same `AGENTS.md`:
+links Codex and Claude Code to the same `AGENTS.md`. Hermes receives the same
+defaults in a managed section of its global `SOUL.md`:
 
 | Runner | Global entry |
 | --- | --- |
 | Codex | `~/.codex/AGENTS.md` |
 | Claude Code | `~/.claude/CLAUDE.md` |
-| OpenCode | `~/.config/opencode/AGENTS.md` |
+| Hermes | `~/.hermes/SOUL.md` (managed section) |
 
 Existing instructions and previous installations are backed up under
 `~/.agents/backups/agent-rules/`. A failed replacement attempts to restore every
@@ -29,10 +30,15 @@ the same content; removing the source worktree does not break installed rules.
 Claude's `~/.claude/rules/agent-rules` also points to the installed language rules,
 retaining their file-type filters. Any existing copy or link is backed up first.
 
+Hermes personality text outside the managed section is preserved. Existing
+profiles under `~/.hermes/profiles/` receive the defaults too; rerun after adding
+a profile. Hermes loads this content globally, independently of project
+instructions; see its [context-file documentation](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files).
+
 Start a new agent session after installation. Orca's managed profiles may mirror
 these native files; verify the effective entry when using a custom account,
-`CODEX_HOME`, SSH, WSL, or another host. Install on each execution host that needs
-these preferences. Other runners need their documented global entry file pointed
+`CODEX_HOME`, `HERMES_HOME`, SSH, WSL, or another host. Install on each execution
+host that needs these preferences. Other runners need their global entry pointed
 at the same installed source.
 
 Do not symlink this root over a project's own `AGENTS.md`: global personal
