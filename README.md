@@ -1,72 +1,81 @@
 # Agent Rules
 
-Guidelines for AI coding assistants, organized for progressive disclosure:
-a small root file that's always in context, and topic files that get loaded
-only when the work touches them.
+Personal defaults shared by coding agents and models. The root instructions stay
+small; load one relevant topic instead of reading a rule catalog on every task.
 
-## Philosophy
+## Install
 
-These files hold opinions and gotchas — not language basics the model
-already knows and not anything a linter or compiler enforces. Rules stay
-prescriptive where mistakes are expensive (Solidity and Solana security)
-and give way to judgement everywhere else.
-
-The structure follows Anthropic's
-[The new rules of context engineering for Claude 5 generation
-models](https://claude.com/blog/the-new-rules-of-context-engineering-for-claude-5-generation-models)
-and Claude Code's
-[memory layout](https://code.claude.com/docs/en/memory): always-loaded
-instructions, path-scoped rules, and task-triggered skills.
-
-## Structure
-
-| Path | Contents | Loaded |
-| --- | --- | --- |
-| [AGENTS.md](./AGENTS.md) | Communication, working agreement, verification, index | Always |
-| [.claude/rules/rust.md](./.claude/rules/rust.md) | Rust conventions | `**/*.rs` |
-| [.claude/rules/solana.md](./.claude/rules/solana.md) | Solana program security | `**/programs/**/*.rs`, `**/Anchor.toml` |
-| [.claude/rules/solidity.md](./.claude/rules/solidity.md) | Solidity contracts | `**/*.sol` |
-| [.claude/skills/sql-indexes](./.claude/skills/sql-indexes/SKILL.md) | Database index design | Index or slow-query work |
-| [.claude/skills/github-cli](./.claude/skills/github-cli/SKILL.md) | `gh` CLI recipes | Reading or responding on GitHub |
-
-Each rule file carries a `paths` front matter block that Claude Code uses
-to decide when to load it. Skills load on their `description`.
-
-## Usage
-
-### Claude Code
-
-Install once; every project on the machine then gets the rules and skills
-without any per-project setup:
+From this checkout, using Python 3.10 or later on Linux or macOS:
 
 ```bash
-mkdir -p ~/.claude/rules ~/.claude/skills
-ln -sfn "$PWD/.claude/rules" ~/.claude/rules/agent-rules
-for s in .claude/skills/*/; do
-  ln -sfn "$PWD/${s%/}" ~/.claude/skills/
-done
+python3 scripts/install.py
 ```
 
-Then import the root file from your user memory so it is always in context:
+The installer puts a self-contained snapshot in `~/.agents/agent-rules/` and
+links each runner's native entry file to the same `AGENTS.md`:
+
+| Runner | Global entry |
+| --- | --- |
+| Codex | `~/.codex/AGENTS.md` |
+| Claude Code | `~/.claude/CLAUDE.md` |
+| OpenCode | `~/.config/opencode/AGENTS.md` |
+
+Existing instructions and previous installations are backed up under
+`~/.agents/backups/agent-rules/`. A failed replacement restores the previous
+installation. Re-running the installer updates every entry to the same content;
+removing the source worktree does not break installed rules.
+
+Claude's `~/.claude/rules/agent-rules` also points to the installed language rules,
+retaining their file-type filters. Any existing copy or link is backed up first.
+
+Start a new agent session after installation. Orca's managed profiles may mirror
+these native files; verify the effective entry when using a custom account,
+`CODEX_HOME`, SSH, WSL, or another host. Install on each execution host that needs
+these preferences. Other runners need their documented global entry file pointed
+at the same installed source.
+
+Do not symlink this root over a project's own `AGENTS.md`: global personal
+preferences and repository instructions serve different scopes.
+
+## Context budget
+
+[AGENTS.md](AGENTS.md) contains the standing defaults. Its topic links are
+instructions to read a relevant file, not a reason to preload all of them.
+After install, resolve those links under `~/.agents/agent-rules/`.
+
+| Load when | Guidance |
+| --- | --- |
+| Git history, review, or PR cleanup needs detail | [rules/git.md](rules/git.md) |
+| Operating services or writing a runbook | [rules/operations.md](rules/operations.md) |
+| Editing Rust | [.claude/rules/rust.md](.claude/rules/rust.md) |
+| Working on a Solana program | [.claude/rules/solana.md](.claude/rules/solana.md) |
+| Editing Solidity | [.claude/rules/solidity.md](.claude/rules/solidity.md) |
+| Designing indexes or diagnosing a slow query | [.claude/skills/sql-indexes/SKILL.md](.claude/skills/sql-indexes/SKILL.md) |
+| Needing detailed GitHub CLI recipes | [.claude/skills/github-cli/SKILL.md](.claude/skills/github-cli/SKILL.md) |
+
+The existing skill files are included as references. Automatic skill discovery
+is runner-specific; other agents read the linked language guidance on demand.
+Don't install a whole directory as unconditional startup text.
+
+## Private context
+
+Keep project memory, organization rules, credentials and session histories out of
+this repository. A local `~/.agents/CONTEXT.md` can map repository owners or paths
+to private rule and memory indexes. Match the current project, read its short
+index, then retrieve only relevant notes. Treat historical notes as evidence to
+verify, not instructions that override current preferences.
+
+Save broadly reusable preferences here. Save project facts in the owning private
+memory. Archive superseded feedback instead of growing the startup rule list.
+
+## Validation
 
 ```bash
-grep -qxF "@$PWD/AGENTS.md" ~/.claude/CLAUDE.md 2>/dev/null \
-  || echo "@$PWD/AGENTS.md" >> ~/.claude/CLAUDE.md
+python3 -m unittest discover -s tests -v
 ```
 
-Each link points back into this checkout, so keep the repo where it is
-after linking.
-
-### Other agents
-
-Symlink `AGENTS.md` into a project root:
-
-```bash
-ln -sfn ~/path/to/agent-rules/AGENTS.md /path/to/project/AGENTS.md
-```
-
-If you copy it instead, copy the whole set — `AGENTS.md` links to the topic
-files by relative path, and a lone copy leaves those links dangling.
+CI also lints Markdown. Installation tests cover shared content, updates, existing
+instruction backups, private-context preservation and rollback after failure.
 
 ## License
 
@@ -74,18 +83,15 @@ Dual-licensed.
 
 ### GPL v3.0
 
-[.claude/rules/rust.md](./.claude/rules/rust.md) is derived from
-[Canonical's Rust Best
-Practices](https://canonical.github.io/rust-best-practices/) and is
-licensed under the GNU General Public License v3.0.
+[.claude/rules/rust.md](.claude/rules/rust.md) is derived from
+[Canonical's Rust Best Practices](https://canonical.github.io/rust-best-practices/)
+and is licensed under the GNU General Public License v3.0.
 
 ### MIT
 
-Everything else — `AGENTS.md`, `README.md`, the remaining files under
-`.claude/rules/` and `.claude/skills/` — is licensed under the MIT License.
+Everything else is licensed under the MIT License.
 
 ## Contributing
 
-Contributions are welcome. Please comply with the licensing terms of the
-respective files, and keep new rules to things that aren't obvious to a
-current-generation model.
+Keep instructions consequential and scoped. Omit language basics and rules that
+are already enforced by tooling. Follow the licensing of the file being changed.
