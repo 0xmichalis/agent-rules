@@ -1,4 +1,6 @@
 import importlib.util
+from contextlib import redirect_stderr
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -79,6 +81,41 @@ class InstallationTests(unittest.TestCase):
                 installer.install(self.source, self.home)
         for entry in installer.ENTRIES:
             self.assertEqual((self.home / entry).read_text(), "# Shared rules\n")
+
+    def test_failed_rollback_restores_other_entries_and_preserves_original_error(self):
+        installer.install(self.source, self.home)
+        (self.source / "AGENTS.md").write_text("# New rules\n")
+        original = Path.rename
+        installation_error = OSError("Simulated replacement failure")
+
+        def fail_installation_and_one_restore(path, target):
+            if path.name == "entry-1":
+                raise installation_error
+            if path.name == "AGENTS.md" and path.parent.name == ".codex":
+                if "backups" in path.parts:
+                    raise OSError("Simulated rollback failure")
+            return original(path, target)
+
+        diagnostics = io.StringIO()
+        with patch.object(Path, "rename", fail_installation_and_one_restore):
+            with redirect_stderr(diagnostics):
+                with self.assertRaises(OSError) as raised:
+                    installer.install(self.source, self.home)
+
+        self.assertIs(raised.exception, installation_error)
+        self.assertEqual(
+            (self.home / ".agents/agent-rules/AGENTS.md").read_text(),
+            "# Shared rules\n",
+        )
+        for entry in installer.ENTRIES[1:]:
+            self.assertEqual((self.home / entry).read_text(), "# Shared rules\n")
+        backups = list(
+            (self.home / ".agents/backups/agent-rules").glob("*/.codex/AGENTS.md")
+        )
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), "# Shared rules\n")
+        self.assertIn("Simulated rollback failure", diagnostics.getvalue())
+        self.assertIn(str(backups[0].parents[1]), diagnostics.getvalue())
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 
 
@@ -64,9 +65,16 @@ def install(source, home):
                 prepared.rename(destination)
         except Exception:
             for destination, saved in reversed(replaced):
-                remove(destination)
-                if saved is not None:
-                    saved.rename(destination)
+                try:
+                    remove(destination)
+                    if saved is not None:
+                        saved.rename(destination)
+                except Exception as rollback_error:
+                    print(
+                        f"Rollback failed for {destination}: {rollback_error}. "
+                        f"Backups retained at {backup}",
+                        file=sys.stderr,
+                    )
             raise
     return backup if backup.exists() else None
 

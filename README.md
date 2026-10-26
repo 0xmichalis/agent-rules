@@ -21,9 +21,10 @@ links each runner's native entry file to the same `AGENTS.md`:
 | OpenCode | `~/.config/opencode/AGENTS.md` |
 
 Existing instructions and previous installations are backed up under
-`~/.agents/backups/agent-rules/`. A failed replacement restores the previous
-installation. Re-running the installer updates every entry to the same content;
-removing the source worktree does not break installed rules.
+`~/.agents/backups/agent-rules/`. A failed replacement attempts to restore every
+previous entry; rollback failures report the retained backup location without
+hiding the installation error. Re-running the installer updates every entry to
+the same content; removing the source worktree does not break installed rules.
 
 Claude's `~/.claude/rules/agent-rules` also points to the installed language rules,
 retaining their file-type filters. Any existing copy or link is backed up first.
