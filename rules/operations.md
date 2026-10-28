@@ -9,8 +9,10 @@
 * Group multi-environment procedures by environment: complete staging and its
   verification before production. State what success looks like.
 * For Terraform, give each stack's init, plan with `-out`, and saved-plan apply
-  separately. Inspect the plan before applying; honor project-specific execution
-  permissions and refresh behavior. Never assume planning has no side effects.
+  separately, written out in full with the stack's path, in PR descriptions too.
+  Never one templated command set with a stack placeholder. Inspect the plan
+  before applying; honor project-specific execution permissions and refresh
+  behavior. Never assume planning has no side effects.
 * Use the appropriate CLI for a one-off operational action rather than adding
   temporary deployment flags. Permanent managed resources and repeatable
   workflows stay in the owning configuration. Record consequential operations.
