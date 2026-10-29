@@ -13,9 +13,9 @@
 * Review the current PR head, not an assumed matching local checkout. Look
   outside the diff: other readers of changed data and APIs, stored data and
   rollback, library behavior at the pinned version, deploy order, alerts, and
-  whether the tests can fail. Back substantive findings with code evidence or
-  a focused reproduction. Check relevant CI before approving; obey platform
-  self-review restrictions.
+  whether the tests can fail. Back substantive findings with code evidence, a
+  focused reproduction or a read of live state. Check relevant CI before
+  approving; obey platform self-review restrictions.
 * Leave approval summaries empty by default; put non-blocking notes inline and
   leave resolving them to the author. On your own PRs, reply in each addressed
   thread and resolve completed work; avoid duplicate replies.
