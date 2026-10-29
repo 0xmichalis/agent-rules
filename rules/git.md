@@ -10,12 +10,15 @@
 * A fix to a PR you maintain includes pushing the update. A request for a local
   commit without publication stays local. Existing user instructions control
   whether an unrelated branch should be published.
-* Review the current PR head, not an assumed matching local checkout. Back
-  substantive findings with code evidence or a focused reproduction. Check
-  relevant CI before approving; obey platform self-review restrictions.
-* Leave approval summaries empty by default; put non-blocking notes inline.
-  Reply in each addressed thread and resolve completed work; avoid duplicate
-  replies.
+* Review the current PR head, not an assumed matching local checkout. Look
+  outside the diff: other readers of changed data and APIs, stored data and
+  rollback, library behavior at the pinned version, deploy order, alerts, and
+  whether the tests can fail. Back substantive findings with code evidence, a
+  focused reproduction or a read of live state. Check relevant CI before
+  approving; obey platform self-review restrictions.
+* Leave approval summaries empty by default; put non-blocking notes inline and
+  leave resolving them to the author. On your own PRs, reply in each addressed
+  thread and resolve completed work; avoid duplicate replies.
 * Check available review comments and CI before handoff and address actionable
   feedback.
 * After an owned PR update, fast-forward a matching user checkout only when its
