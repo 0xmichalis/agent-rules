@@ -5,11 +5,14 @@
   Track owned processes and stop them gracefully before escalating termination.
 * Provide complete commands with known inputs filled in. Use native directory
   flags or absolute paths, one command per fenced block, without chained steps
-  or unnecessary setup. Include actual prerequisites.
+  or unnecessary setup. Include actual prerequisites. In shared text, use paths
+  relative to the repository root and say to run from there, never a
+  workstation-specific path.
 * Group multi-environment procedures by environment: complete staging and its
   verification before production. State what success looks like.
 * For Terraform, give each stack's init, plan with `-out`, and saved-plan apply
-  separately, written out in full with the stack's path, in PR descriptions too.
+  separately, written out in full with `-chdir` and the stack's path from the
+  repository root, in PR descriptions too.
   Never one templated command set with a stack placeholder. Inspect the plan
   before applying; honor project-specific execution permissions and refresh
   behavior. Never assume planning has no side effects.
