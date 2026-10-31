@@ -20,7 +20,10 @@
   leave resolving them to the author. On your own PRs, reply in each addressed
   thread and resolve completed work; avoid duplicate replies.
 * Check available review comments and CI before handoff and address actionable
-  feedback.
+  feedback. Automatic reviewers can post minutes after a push; wait for their
+  review of the current head before merging.
+* In public repositories, don't mention private repos in commits, code
+  comments, PR text or review replies.
 * After an owned PR update, fast-forward a matching user checkout only when its
   state permits it; stop on divergence. Never reset or stash the user's work to
   force synchronization.
