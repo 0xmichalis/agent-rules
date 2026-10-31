@@ -8,6 +8,7 @@
   or unnecessary setup. Include actual prerequisites. In shared text, use paths
   relative to the repository root and say to run from there, never a
   workstation-specific path.
+* Use `vi` when a command opens a text editor, never `nano`.
 * Group multi-environment procedures by environment: complete staging and its
   verification before production. State what success looks like.
 * For Terraform, give each stack's init, plan with `-out`, and saved-plan apply
