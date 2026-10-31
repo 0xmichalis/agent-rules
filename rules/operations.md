@@ -16,6 +16,7 @@
   Never one templated command set with a stack placeholder. Inspect the plan
   before applying; honor project-specific execution permissions and refresh
   behavior. Never assume planning has no side effects.
+* Separate CI workflow steps with one blank line.
 * Use the appropriate CLI for a one-off operational action rather than adding
   temporary deployment flags. Permanent managed resources and repeatable
   workflows stay in the owning configuration. Record consequential operations.
