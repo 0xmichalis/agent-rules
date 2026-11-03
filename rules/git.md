@@ -1,7 +1,9 @@
 # Git and pull requests
 
 * Start changes in a new worktree and feature branch, never on the repository's
-  default branch. Fetch before starting and use the intended PR base.
+  default branch. Fetch before starting and use the intended PR base. Check
+  the target repository's open PRs for the same change first; review or build
+  on an existing one rather than opening a duplicate.
 * Never move or delete a branch held by another worktree. Stage relevant files
   explicitly, retain signing and avoid direct pushes to protected branches.
 * Keep meaningful commits self-contained. Fold corrections into their owning
