@@ -17,8 +17,10 @@
   focused reproduction or a read of live state. Check relevant CI before
   approving; obey platform self-review restrictions.
 * Leave approval summaries empty by default; put non-blocking notes inline and
-  leave resolving them to the author. On your own PRs, reply in each addressed
-  thread and resolve completed work; avoid duplicate replies.
+  leave resolving them to the author. On your own PRs, reply in every review
+  thread, including automated reviewers and declined or false findings, with
+  the evidence, then resolve it. Never resolve silently or ask before
+  replying; avoid duplicate replies.
 * Check available review comments and CI before handoff and address actionable
   feedback. Automatic reviewers can post minutes after a push; wait for their
   review of the current head before merging.
