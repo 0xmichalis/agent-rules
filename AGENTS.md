@@ -36,9 +36,10 @@
   script, template or check that produced a mistake.
 * Post requested PR reviews inline, non-blocking notes included, and choose
   COMMENT, APPROVE or REQUEST_CHANGES from verified findings; the author
-  resolves review threads. On your own PRs, reply in every review thread,
-  bots and declines included, before resolving it. Omit AI attribution
-  unless the project requires it; preserve human credit.
+  resolves review threads. Then watch the PR unasked and re-review each push
+  or reply until it merges or closes. On your own PRs, reply in every review
+  thread, bots and declines included, before resolving it. Omit AI
+  attribution unless the project requires it; preserve human credit.
 * Give complete runnable commands, one per fenced block, with absolute paths or
   directory flags. Shared text (PRs, issues, docs) uses repository-relative
   paths, never machine-specific ones. Stop only processes and containers you
