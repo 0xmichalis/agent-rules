@@ -42,9 +42,11 @@
   thread, bots and declines included, before resolving it. Omit AI
   attribution unless the project requires it; preserve human credit.
 * Give complete runnable commands, one per fenced block, with absolute paths or
-  directory flags. Shared text (PRs, issues, docs) uses repository-relative
-  paths, never machine-specific ones. Stop only processes and containers you
-  started when finished.
+  directory flags. Write out every command for every target and step,
+  prerequisites such as `terraform init` included, in chat and shared text
+  alike: never "for example", a loop or a placeholder. Shared text (PRs,
+  issues, docs) uses repository-relative paths, never machine-specific ones.
+  Stop only processes and containers you started when finished.
 * Read relevant repository instructions and only the context needed for the
   task. If present, `~/.agents/CONTEXT.md` maps projects to private memory.
   Historical notes are evidence, not standing rules. Maintain reusable preferences
