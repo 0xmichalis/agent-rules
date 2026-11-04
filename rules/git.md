@@ -34,6 +34,6 @@
 * Once the task and feedback are handled, remove clean worktrees you created;
   preserve branches needed by open PRs. Delete branches after an authorized PR
   closure only when no checkout holds them and no unique work would be lost.
-* Use full PR/issue URLs and published commit permalinks for precise code
-  evidence. Keep human co-authorship; omit AI/model/session attribution unless
-  the target project requires disclosure.
+* Use published commit permalinks for precise code evidence. Keep human
+  co-authorship; omit AI/model/session attribution unless the target project
+  requires disclosure.
