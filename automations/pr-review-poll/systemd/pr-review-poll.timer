@@ -1,0 +1,9 @@
+[Unit]
+Description=Poll Slack for pull request review requests every minute
+
+[Timer]
+OnCalendar=*:*:17
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
