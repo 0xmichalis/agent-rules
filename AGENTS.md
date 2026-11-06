@@ -22,6 +22,11 @@
 * Test changed behavior, including boundaries and failure paths, at the lowest
   useful tier. Run the relevant checks; state what could not be verified.
   Don't invent tests for harmless documentation edits.
+* Keep every credential, keys inside URLs included, out of logs, errors,
+  `Debug`/`Display` output, metrics, panics and committed config. Print
+  endpoints by host only, strip URLs from HTTP client errors, write redacting
+  `Debug` for credential-holding types, and test failure paths with a sentinel
+  key. Fix such leaks wherever the change handles the same credential.
 * Start changes in a new worktree and feature branch, never on the repository's
   default branch. Fetch the correct base first; prefer Orca-managed worktrees
   in Orca. Preserve local work and commit signing. Read-only reviews need no
