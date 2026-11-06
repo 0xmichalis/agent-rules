@@ -1,6 +1,6 @@
 # PR review poll
 
-Starts a Claude Code review session when someone mentions you in Slack with a
+Starts an agent review session in Orca when someone mentions you in Slack with a
 link to a pull request in your GitHub organization. Nobody has to create a Slack
 app: the poll uses your own claude.ai Slack connector.
 
@@ -10,39 +10,42 @@ A systemd user timer runs `pr_review_poll.py run` every minute; systemd never
 starts a run while the previous one is still going. Each run has three steps.
 
 1. Housekeeping. Every three minutes it checks the pull requests of the sessions
-   it started. New commits, new comments from people or a new Slack request
-   resume the session with the details. A session whose pull requests have all
-   merged or closed is stopped. At most three review sessions work at once;
-   queued requests start when one goes idle.
+   it started. New commits, new comments from people or a new Slack request are
+   sent to the session's agent as a message; a busy agent takes it after its
+   current turn. When all of a session's pull requests have merged or closed,
+   its tab is closed. At most three agents review at once; queued requests start
+   when one finishes.
 2. Poll. A headless Claude Haiku session in restricted mode searches Slack for
-   messages that mention you, starting ten minutes before the last successful
-   poll. A run in which the search did not happen counts as failed and leaves
-   that starting point alone. For each message with a pull request link it runs `pr_review_poll.py
-   submit`. It can run no other command beyond read-only shell built-ins, and it
-   ignores your settings files.
+   messages that mention you, starting 30 minutes before the last successful
+   poll, because Slack search can return a message minutes after it was posted.
+   Messages already handled in that window are listed in the prompt. A run in
+   which the search did not happen counts as failed and leaves that starting
+   point alone. For each message with a pull request link it runs
+   `pr_review_poll.py submit`. It can run no other command beyond read-only
+   shell built-ins, and it ignores your settings files.
 3. Submit. The dispatcher validates the permalink, author and pull request URLs
    and ignores messages it has handled. It skips pull requests that are merged
    or closed, yours, opened from a fork or approved by you at the current head.
-   It starts one Opus 5.5 background session at `xhigh` effort per message, in
-   `REVIEW_CWD`. The session's prompt contains only the validated URLs.
+   It starts one agent per message with `orca agent launch`, as a tab named
+   `review-<repo>-<number>` in the Orca workspace that contains `REVIEW_CWD`.
+   The agent's prompt contains only the validated URLs. If the agent cannot
+   start, for example because Orca is closed, the request is queued and retried.
 
-Review sessions never approve. When a pull request is ready, the session sends a
-push notification and waits; attach with `claude attach <id>` and ask it to
+`REVIEW_AGENT`, `REVIEW_MODEL` and `REVIEW_EFFORT` choose the agent, which
+default to `claude`, `claude-opus-5-5` and `xhigh`. Orca starts the agent with
+the arguments from your Orca agent settings.
+
+Review sessions never approve. When a pull request is ready, the agent sends a
+push notification if it can and waits; open its tab in Orca and ask it to
 approve.
-
-Background sessions run with `bypassPermissions` in `REVIEW_CWD`, so your
-instructions and permissions there apply. Each one starts inside its own
-systemd scope: the Claude background supervisor starts on demand, and a
-supervisor started inside the timer's oneshot service would be killed, along
-with its sessions, when the run ends.
 
 ## Requirements
 
 - Linux with a systemd user manager.
-- Claude Code with background sessions, signed in to a claude.ai account with
-  the Slack connector connected.
+- Orca running, with `REVIEW_CWD` inside one of its workspaces.
+- Claude Code signed in to a claude.ai account with the Slack connector
+  connected. The poll always uses Claude, whatever the review agent is.
 - `gh` signed in with access to the organization.
-- `REVIEW_CWD` trusted by Claude Code. Run `claude` there once to accept it.
 
 ## Set up
 
@@ -60,7 +63,16 @@ SLACK_DOMAIN=example.slack.com
 GITHUB_ORG=ExampleOrg
 GITHUB_LOGIN=your-github-login
 REVIEW_CWD=/absolute/path/to/your/workspace
+ORCA_CLI_COMMAND=/absolute/path/to/orca-cli
+REVIEW_AGENT=claude
+REVIEW_MODEL=claude-opus-5-5
+REVIEW_EFFORT=xhigh
 ```
+
+Set `ORCA_CLI_COMMAND` to the value of `$ORCA_CLI_COMMAND` in an Orca terminal.
+Outside Orca's terminals, `orca` on Linux usually starts the GNOME screen
+reader, and an older `orca-ide` may not have the agent commands. The last three
+lines are optional.
 
 Replay the last day without starting sessions. It uses separate state and
 prints what it would do:
@@ -108,5 +120,9 @@ systemctl --user disable --now pr-review-poll.timer
   needs reauthorizing in claude.ai, it sends a desktop notification, repeated
   at most hourly.
 - Slack's search index can lag a message by up to a minute or so.
+- Sessions are tracked by their Orca pane. If a tab is closed or Orca loses it,
+  the session is forgotten and the next request for its pull requests starts a
+  new one. Requests that cannot start for 15 minutes send a desktop
+  notification.
 - A message whose pull request link the poll cannot pass on is rejected and
-  logged; it is retried until it falls out of the ten-minute overlap.
+  logged; it is retried until it falls out of the 30-minute overlap.
