@@ -22,6 +22,11 @@
 * Test changed behavior, including boundaries and failure paths, at the lowest
   useful tier. Run the relevant checks; state what could not be verified.
   Don't invent tests for harmless documentation edits.
+* For substantial performance-critical code changes, the main agent runs a
+  read-only [performance scout](rules/performance-scout.md) at a meaningful
+  checkpoint: fast by default, deep for requested comprehensive reviews.
+  Delegate when available; otherwise review directly and disclose that it was
+  not independent. Validate gains with representative optimized-build measurements.
 * Keep every credential, keys inside URLs included, out of logs, errors,
   `Debug`/`Display` output, metrics, panics and committed config. Print
   endpoints by host only, strip URLs from HTTP client errors, write redacting

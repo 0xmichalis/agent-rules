@@ -63,15 +63,12 @@ After install, resolve those links under `~/.agents/agent-rules/`.
 | --- | --- |
 | Git history, review, or PR cleanup needs detail | [rules/git.md](rules/git.md) |
 | Operating services or writing a runbook | [rules/operations.md](rules/operations.md) |
+| Performance review | [rules/performance-scout.md](rules/performance-scout.md) |
 | Editing Rust | [.claude/rules/rust.md](.claude/rules/rust.md) |
 | Working on a Solana program | [.claude/rules/solana.md](.claude/rules/solana.md) |
 | Editing Solidity | [.claude/rules/solidity.md](.claude/rules/solidity.md) |
 | Designing indexes or diagnosing a slow query | [.claude/skills/sql-indexes/SKILL.md](.claude/skills/sql-indexes/SKILL.md) |
 | Needing detailed GitHub CLI recipes | [.claude/skills/github-cli/SKILL.md](.claude/skills/github-cli/SKILL.md) |
-
-The existing skill files are included as references. Automatic skill discovery
-is runner-specific; other agents read the linked language guidance on demand.
-Don't install a whole directory as unconditional startup text.
 
 ## Private context
 
