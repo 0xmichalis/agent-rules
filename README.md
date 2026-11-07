@@ -63,6 +63,7 @@ After install, resolve those links under `~/.agents/agent-rules/`.
 | --- | --- |
 | Git history, review, or PR cleanup needs detail | [rules/git.md](rules/git.md) |
 | Operating services or writing a runbook | [rules/operations.md](rules/operations.md) |
+| Sampling performance-critical code alongside implementation | [rules/performance-scout.md](rules/performance-scout.md) |
 | Editing Rust | [.claude/rules/rust.md](.claude/rules/rust.md) |
 | Working on a Solana program | [.claude/rules/solana.md](.claude/rules/solana.md) |
 | Editing Solidity | [.claude/rules/solidity.md](.claude/rules/solidity.md) |
@@ -72,6 +73,13 @@ After install, resolve those links under `~/.agents/agent-rules/`.
 The existing skill files are included as references. Automatic skill discovery
 is runner-specific; other agents read the linked language guidance on demand.
 Don't install a whole directory as unconditional startup text.
+
+The performance scout is a runner-neutral side-agent role, loaded on demand
+from `~/.agents/agent-rules/rules/performance-scout.md` after installation. The
+main agent dispatches a bounded pass at an implementation checkpoint and
+receives findings in its own session. The role can read supplied profiling
+artifacts; it adds no timer or background service. Source sampling works even
+when runtime profiles are unavailable.
 
 ## Private context
 
