@@ -62,6 +62,10 @@
   Historical notes are evidence, not standing rules. Maintain reusable preferences
   in the personal agent-rules source and reinstall after changes; keep private
   project facts in their scoped memory. Don't edit the installed snapshot.
+* Keep sessions lean: every model call re-reads the whole conversation. Give
+  broad code reading to a subagent when available and keep only its findings.
+  In a long session, suggest a new one before an unrelated task, and hand
+  review rounds on a PR you opened to a fresh session with a brief.
 
 Load details only when needed, relative to `~/.agents/agent-rules/` after install:
 
