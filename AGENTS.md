@@ -22,10 +22,12 @@
 * Test changed behavior, including boundaries and failure paths, at the lowest
   useful tier. Run the relevant checks; state what could not be verified.
   Don't invent tests for harmless documentation edits.
-* For substantial performance-critical code changes, run a bounded read-only
-  side agent using [rules/performance-scout.md](rules/performance-scout.md) at a
-  meaningful checkpoint. Use source sampling to discover candidates and
-  representative optimized-build measurements to validate claimed gains.
+* For substantial performance-critical code changes, the main agent runs a
+  bounded read-only pass using [rules/performance-scout.md](rules/performance-scout.md)
+  at a meaningful checkpoint, delegating when available. If delegation is
+  unavailable or disabled, sample directly and disclose that the pass was not
+  independent. Scouts never delegate. Validate claimed gains with representative
+  optimized-build measurements.
 * Keep every credential, keys inside URLs included, out of logs, errors,
   `Debug`/`Display` output, metrics, panics and committed config. Print
   endpoints by host only, strip URLs from HTTP client errors, write redacting

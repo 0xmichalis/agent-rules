@@ -8,8 +8,11 @@ to the main agent so it can decide what to investigate and measure.
 
 The main agent starts one bounded pass at a meaningful checkpoint in a
 substantial performance-critical code change. Skip documentation and mechanical
-edits. Use the runner's existing side-agent mechanism; keep the implementation
-moving while the scout reads. Re-run only when relevant code or evidence changes.
+edits. Only the main agent dispatches scouts; scouts never delegate. Use the
+runner's existing side-agent mechanism when available, keeping the implementation
+moving while the scout reads. If delegation is unavailable or disabled, the main
+agent performs this bounded pass directly and discloses that it was not
+independent. Re-run only when relevant code or evidence changes.
 
 Supply the repository/worktree, task intent, critical path and current revision
 with the relevant diff, including staged, unstaged and selected untracked code.

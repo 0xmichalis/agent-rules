@@ -77,7 +77,9 @@ Don't install a whole directory as unconditional startup text.
 The performance scout is a runner-neutral side-agent role, loaded on demand
 from `~/.agents/agent-rules/rules/performance-scout.md` after installation. The
 main agent dispatches a bounded pass at an implementation checkpoint and
-receives findings in its own session. The role can read supplied profiling
+receives findings in its own session. If delegation is unavailable or disabled,
+the main agent performs the pass directly and discloses that it was not
+independent. Scouts never delegate. The role can read supplied profiling
 artifacts; it adds no timer or background service. Source sampling works even
 when runtime profiles are unavailable.
 
