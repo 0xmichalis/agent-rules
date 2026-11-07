@@ -4,8 +4,8 @@
   default branch. Fetch before starting and use the intended PR base. Check
   the target repository's open PRs for the same change first; review or build
   on an existing one rather than opening a duplicate.
-* Never move or delete a branch held by another worktree. Stage relevant files
-  explicitly, retain signing and avoid direct pushes to protected branches.
+* Never move or delete a local branch held by another worktree. Stage relevant
+  files explicitly, retain signing and avoid direct pushes to protected branches.
 * Keep meaningful commits self-contained. Fold corrections into their owning
   commits when appropriate. Rewrite published history only when authorized,
   on an owned branch, with an explicit lease; preserve other people's commits.
@@ -32,8 +32,11 @@
   state permits it; stop on divergence. Never reset or stash the user's work to
   force synchronization.
 * Once the task and feedback are handled, remove clean worktrees you created;
-  preserve branches needed by open PRs. Delete branches after an authorized PR
-  closure only when no checkout holds them and no unique work would be lost.
+  preserve branches needed by open PRs.
+* When closing an owned PR, delete its remote head branch and verify removal.
+  First confirm no other open PR needs the branch and its remote head still
+  matches the closed PR. Keep local branches held by worktrees or containing
+  unpreserved work.
 * Use published commit permalinks for precise code evidence. Keep human
   co-authorship; omit AI/model/session attribution unless the target project
   requires disclosure.
