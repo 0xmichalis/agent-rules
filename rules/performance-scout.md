@@ -63,14 +63,15 @@ observed under a named workload. An older profile is a lead until its revision
 and relevant code are checked.
 
 For Rust, cargo-flamegraph output is useful runtime evidence. Prefer folded stack
-text or a textual perf report for exact stack names and sample counts; use the
-SVG for navigation or read its stack hierarchy and titles. Preserve raw capture
-data when available. Request these alongside the graph:
+text or a textual perf report for stack names and recorded weights; use the SVG
+for navigation or read its stack hierarchy and titles. Preserve raw capture data
+when available. Request these alongside the graph:
 
 * Revision and dirty diff, binary/target and features, build profile and symbol
   settings, and tool versions.
 * Workload, data size or request/tick rate, warm-up and capture duration,
-  sampling event and frequency, sample count and collection warnings.
+  sampling event and frequency, raw sample count, weight units and collection
+  warnings.
 * Host/runtime limits, thread or process scope, and absolute latency, throughput
   or CPU measurements relevant to the task.
 
@@ -80,12 +81,14 @@ development defaults. For cargo-flamegraph, its post-process option can retain
 folded stacks while passing them through to graph generation. Keep artifacts in
 the task's existing local scratch/output area; avoid committing private captures.
 
-Interpret width as a fraction of samples for the recorded event. Read the event
-and distinguish inclusive stacks from self cost; do not sum overlapping ancestor
-percentages. A narrower frame or missing function does not prove a speedup or
-zero cost. Symbolization failures, few samples and mismatched workloads limit
-the conclusion. Standard on-CPU captures do not establish allocation volume,
-async wait time, queueing or p99 latency. Request allocation evidence, tracing or
+Interpret width as aggregate weight for the recorded event. Verify the units
+against the raw capture: folded values can be event-period weights, while SVG
+tooltips still label them "samples". Keep raw sample counts separate. Distinguish
+inclusive stacks from self cost; do not sum overlapping ancestor percentages.
+A narrower frame or missing function does not prove a speedup or zero cost.
+Symbolization failures, few samples and mismatched workloads limit the
+conclusion. Standard on-CPU captures do not establish allocation volume, async
+wait time, queueing or p99 latency. Request allocation evidence, tracing or
 off-CPU data when those are needed to test the specific hypothesis.
 
 Use profiles to select targets, then have the main agent validate with before
