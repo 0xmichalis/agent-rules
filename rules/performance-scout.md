@@ -44,6 +44,9 @@ mode's caps, within its scope and budget:
    cost model; compare captures where useful and explain mismatches or missing
    evidence.
 
+The main agent captures a CPU profile and, for async code, a Console recording
+before or alongside the scouts, or names the blocker that prevented it.
+
 Maintain reviewed, partial and unreviewed coverage with its evidence. A sample
 is partial coverage. Report unfinished work and blockers explicitly; completion
 requires inspecting the scoped inventory and tracing its relevant flows.
@@ -53,7 +56,9 @@ requires inspecting the scoped inventory and tracing its relevant flows.
 Establish frequency, input size and data lifetime. Inspect repeated scans,
 computation, allocation/copying, serialization, strings/hashing, pointer
 indirection, locks, queues, scheduling, serial I/O and diagnostics on critical
-paths. A name or visible allocation alone does not establish a bottleneck;
+paths. Check connection, client and TLS construction per operation,
+authentication handshakes, and one-time initialization raced by concurrent first
+callers. A name or visible allocation alone does not establish a bottleneck;
 substantiate small costs through their multiplicity.
 
 Prefer eliminating work, changing its frequency, batching or simplifying an
@@ -74,6 +79,9 @@ capture's revision and relevant code before relying on it. Request:
 * Workload, sizes/rates, warm-up and duration; host/runtime limits and thread or
   process scope; absolute latency, throughput or CPU metrics; collection warnings.
 
+State which findings the local workload cannot reproduce, such as network
+latency hidden by loopback, and the staging measurement that would settle each.
+
 Keep raw data in local task artifacts, outside commits. Prefer structured/text
 evidence and verify the pinned tool's recording/export and reader support.
 
@@ -85,10 +93,13 @@ units. Check units against raw data: folded values may be event-period weights
 despite SVG tooltips saying "samples". Separate self from inclusive cost and do
 not sum overlapping ancestors. Missing frames or narrower widths do not prove
 zero cost or a speedup; unresolved symbols, sample counts, data loss and workload
-mismatches limit attribution.
+mismatches limit attribution. If stacks end in a single frame inside C
+libraries, recapture with DWARF unwinding.
 
 On-CPU profiles do not establish allocation volume, async waits, queueing or p99
 latency. Request allocation, tracing or off-CPU evidence for those hypotheses.
+For stalls and waits, use stage timing from log timestamps or spans, a syscall
+trace, and the same pattern in production logs.
 Use representative optimized builds with symbols; the main agent can enable
 release/bench debug information without changing normal debug defaults and use
 cargo-flamegraph's post-process option to retain folded stacks.
@@ -99,6 +110,7 @@ Use Console for scheduling delays, long polls, wakeups, task lifetime and
 instrumented resource waits. Fast mode consumes existing telemetry; deep mode
 requests targeted capture when async behavior could explain the cost model.
 Tie task IDs, spawn locations and resources to source and observation windows.
+File recordings omit spawn locations; name tasks or group them by future size.
 
 * Busy time is elapsed poll time, not CPU time; blocking or preemption can extend
   polls. Correlate with CPU stacks and tracing before assigning a cause.
