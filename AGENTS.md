@@ -4,6 +4,9 @@
   skip explanations of code I can see. Include a 1–10 confidence score with
   solutions. Push back when the premise is wrong. Every PR or issue you mention,
   in chat, PR text, review comments, Slack or docs, links to that exact item.
+* Reply in the original Slack thread when one is provided. Try sending there
+  first; if sending is unavailable or blocked, save a draft reply in that same
+  thread. Don't switch to a DM or another channel unless I ask.
 * Use your judgment. Ask only when missing information materially changes the
   work or authorization. Prefer simple, complete solutions and existing patterns.
   Justify each new component, credential, flag or step, or drop it. Do
