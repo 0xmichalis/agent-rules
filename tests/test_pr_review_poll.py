@@ -568,17 +568,20 @@ class HostTests(unittest.TestCase):
         terminals = {"terminals": [
             {"handle": "term_1", "tabId": "tab1", "leafId": "leafA"},
             {"handle": "term_2", "tabId": "tab2", "leafId": "leafB"},
+            {"handle": "term_3", "tabId": "pty:folder:w@@3", "leafId": "pty:folder:w@@3",
+             "orphaned": True, "recordedPaneKey": "tab3:leafC"},
         ]}
         ps = {"worktrees": [
             {"agents": [{"paneKey": "tab1:leafA", "state": "working"}, {"paneKey": "other:x", "state": "done"}]},
-            {"agents": []},
+            {"agents": [{"paneKey": "tab3:leafC", "state": "working"}]},
         ]}
         replies = [self.reply(terminals), self.reply(ps)]
         with unittest.mock.patch.object(host, "run", side_effect=replies) as run:
             self.assertEqual(
                 host.agents(ORCA, {WORKSPACE}),
                 {"tab1:leafA": {"handle": "term_1", "state": "working"},
-                 "tab2:leafB": {"handle": "term_2", "state": None}},
+                 "tab2:leafB": {"handle": "term_2", "state": None},
+                 "tab3:leafC": {"handle": "term_3", "state": "working"}},
             )
         self.assertEqual(
             [call.args[0] for call in run.call_args_list],

@@ -237,7 +237,10 @@ class Host:
         panes = {}
         for worktree in sorted(worktrees):
             for terminal in self.orca(orca_cli, ["terminal", "list", "--worktree", worktree])["terminals"]:
-                panes[f"{terminal['tabId']}:{terminal['leafId']}"] = {"handle": terminal["handle"], "state": None}
+                # Orca lists a terminal it cannot place in its layout mirror as orphaned,
+                # with a pty: tab and leaf, and keeps its pane key in recordedPaneKey.
+                pane = terminal.get("recordedPaneKey") or f"{terminal['tabId']}:{terminal['leafId']}"
+                panes[pane] = {"handle": terminal["handle"], "state": None}
         for workspace in self.orca(orca_cli, ["worktree", "ps"])["worktrees"]:
             for agent in workspace.get("agents") or []:
                 if agent.get("paneKey") in panes:
