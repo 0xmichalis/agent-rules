@@ -22,7 +22,8 @@
   leave resolving them to the author. On your own PRs, reply in every review
   thread, including automated reviewers and declined or false findings, with
   the evidence, then resolve it. Never resolve silently or ask before
-  replying; avoid duplicate replies.
+  replying; avoid duplicate replies. Don't reply to automated reviewers'
+  quota or rate-limit notices; they contain no findings.
 * Check available review comments and CI before handoff and address actionable
   feedback. Automatic reviewers can post minutes after a push; wait for their
   review of the current head before merging.

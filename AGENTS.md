@@ -49,8 +49,9 @@
   COMMENT, APPROVE or REQUEST_CHANGES from verified findings; the author
   resolves review threads. Then watch the PR unasked and re-review each push
   or reply until it merges or closes. On your own PRs, reply in every review
-  thread, bots and declines included, before resolving it. Omit AI
-  attribution unless the project requires it; preserve human credit.
+  thread, bots and declines included, before resolving it; don't reply to
+  bot quota or rate-limit notices. Omit AI attribution unless the project
+  requires it; preserve human credit.
 * Give complete runnable commands, one per fenced block, with absolute paths or
   directory flags. Write out every command for every target and step,
   prerequisites such as `terraform init` included, in chat and shared text
