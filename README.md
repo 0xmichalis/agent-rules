@@ -39,6 +39,12 @@ Scoped rules keep their `paths:` file filters. Links for skills removed from
 the repository are archived on the next run. Any existing copy or link is
 backed up first.
 
+The installer refuses to change anything when a runner would truncate or reject
+the result: a Hermes `SOUL.md` over 20,000 characters, or a skill name or
+description over Codex's 64- or 1,024-character limits. Codex's 32 KiB
+`project_doc_max_bytes` budget applies to repository `AGENTS.md` files, not
+`~/.codex/AGENTS.md`.
+
 Hermes personality text outside the managed section is preserved. The installer
 honors `HERMES_HOME`; recognized profiles under that home's `profiles/` receive
 the defaults too. Bare directories, deleted profiles and directory symlinks are
@@ -96,8 +102,9 @@ memory. Archive superseded feedback instead of growing the startup rule list.
 python3 -m unittest discover -s tests -v
 ```
 
-CI also lints Markdown. Installation tests cover shared content, updates, existing
-instruction backups, private-context preservation and rollback after failure.
+CI also lints Markdown. Installation tests cover runner limits on this
+repository's content, shared content, updates, existing instruction backups,
+private-context preservation and rollback after failure.
 
 ## License
 

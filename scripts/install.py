@@ -16,6 +16,13 @@ ENTRIES = (".codex/AGENTS.md", ".claude/CLAUDE.md")
 SCOPED_RULES = "rules/scoped"
 # User skill directories read by Claude Code and Codex.
 SKILL_ROOTS = (".claude/skills", ".agents/skills")
+# Runner limits on installed text, verified against the noted releases.
+# Hermes v0.23.2 truncates a SOUL.md beyond its 20,000-character default, the
+# tightest limit any runner puts on AGENTS.md.
+HERMES_SOUL_MAX_CHARS = 20_000
+# Codex 0.162.0 rejects skills whose name or description exceeds these lengths.
+SKILL_NAME_MAX_CHARS = 64
+SKILL_DESCRIPTION_MAX_CHARS = 1_024
 HERMES_START = "<!-- agent-rules:start -->"
 HERMES_END = "<!-- agent-rules:end -->"
 HERMES_PROFILE_FILES = ("config.yaml", ".env", "SOUL.md", "profile.yaml", "auth.json", "state.db")
@@ -36,6 +43,23 @@ def hermes_soul_content(existing, rules):
     if end < start:
         raise ValueError("Invalid agent-rules managed section in Hermes SOUL.md")
     return existing[:start] + section + existing[end + len(HERMES_END):]
+
+
+def check_length(label, text, limit):
+    if len(text) > limit:
+        raise ValueError(f"{label} has {len(text)} characters; the runner limit is {limit}")
+
+
+def check_skill(skill):
+    label = f"skills/{skill.parent.name}/SKILL.md"
+    text = skill.read_text(encoding="utf-8")
+    header = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    fields = dict(re.findall(r"^(name|description):[ \t]*(.*)$", header[1], re.M)) if header else {}
+    for field, limit in (("name", SKILL_NAME_MAX_CHARS), ("description", SKILL_DESCRIPTION_MAX_CHARS)):
+        value = fields.get(field, "").strip()
+        if not value or value[0] in ">|":
+            raise ValueError(f"{label} needs a single-line {field} in its front matter")
+        check_length(f"{label} {field}", value, limit)
 
 
 def remove(path):
@@ -81,6 +105,8 @@ def install(source, home):
                 shutil.copy2(original, copied)
         rules = (payload / "AGENTS.md").read_text(encoding="utf-8")
         skills = sorted(path.parent for path in payload.glob("skills/*/SKILL.md"))
+        for skill in skills:
+            check_skill(skill / "SKILL.md")
         replacements = [(target, payload)]
         for index, entry in enumerate(ENTRIES):
             link = stage / ("entry-" + str(index))
@@ -102,8 +128,10 @@ def install(source, home):
         for index, profile in enumerate([hermes_home, *profiles]):
             soul = profile / "SOUL.md"
             existing = soul.read_text(encoding="utf-8") if soul.exists() else ""
+            content = hermes_soul_content(existing, rules)
+            check_length(f"Hermes {soul}", content, HERMES_SOUL_MAX_CHARS)
             prepared = stage / ("hermes-soul-" + str(index))
-            prepared.write_text(hermes_soul_content(existing, rules), encoding="utf-8")
+            prepared.write_text(content, encoding="utf-8")
             if soul.exists():
                 shutil.copymode(soul, prepared)
             else:
