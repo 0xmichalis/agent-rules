@@ -30,9 +30,17 @@ class InstallationTests(unittest.TestCase):
         self.home.mkdir()
         (self.source / "AGENTS.md").write_text("# Shared rules\n")
         (self.source / "private-memory.md").write_text("Keep private\n")
-        rules = self.source / ".claude/rules"
+        rules = self.source / "rules/scoped"
         rules.mkdir(parents=True)
         (rules / "rust.md").write_text("# Rust rules\n")
+        self.write_skill("demo", "Demo skill.")
+
+    def write_skill(self, name, description):
+        skill = self.source / "skills" / name
+        skill.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n"
+        )
 
     def test_all_runners_share_content_and_install_does_not_depend_on_checkout(self):
         installer.install(self.source, self.home)
@@ -48,6 +56,71 @@ class InstallationTests(unittest.TestCase):
             (self.home / ".claude/rules/agent-rules/rust.md").read_text(),
             "# Rust rules\n",
         )
+        for root in installer.SKILL_ROOTS:
+            self.assertIn("# demo\n", (self.home / root / "demo/SKILL.md").read_text())
+
+    def test_repository_content_fits_runner_limits(self):
+        checkout = Path(__file__).resolve().parents[1]
+        installer.install(checkout, self.home)
+        skills = sorted(path.parent.name for path in checkout.glob("skills/*/SKILL.md"))
+        self.assertTrue(skills)
+        for root in installer.SKILL_ROOTS:
+            for name in skills:
+                self.assertTrue((self.home / root / name / "SKILL.md").is_file())
+        self.assertTrue((self.home / ".claude/rules/agent-rules/rust.md").is_file())
+
+    def test_oversized_text_fails_before_changing_anything(self):
+        soul = self.home / ".hermes/SOUL.md"
+        soul.parent.mkdir()
+        personality = "# Personality\n" + "x" * installer.HERMES_SOUL_MAX_CHARS
+        soul.write_text(personality)
+        with self.assertRaisesRegex(ValueError, "SOUL.md has .* the runner limit is 20000"):
+            installer.install(self.source, self.home)
+        self.assertEqual(soul.read_text(), personality)
+        soul.write_text("# Personality\n")
+        for description, error in (
+            ("d" * (installer.SKILL_DESCRIPTION_MAX_CHARS + 1), "description has 1025"),
+            (">", "needs a single-line description"),
+            ("", "needs a single-line description"),
+        ):
+            self.write_skill("demo", description)
+            with self.assertRaisesRegex(ValueError, "^skills/demo/SKILL.md " + error):
+                installer.install(self.source, self.home)
+        self.write_skill("n" * (installer.SKILL_NAME_MAX_CHARS + 1), "Long name.")
+        self.write_skill("demo", "d" * installer.SKILL_DESCRIPTION_MAX_CHARS)
+        with self.assertRaisesRegex(ValueError, "name has 65"):
+            installer.install(self.source, self.home)
+        self.assertEqual(soul.read_text(), "# Personality\n")
+        self.assertFalse((self.home / ".agents/agent-rules").exists())
+        self.assertFalse((self.home / ".codex").exists())
+
+    def test_quoted_skill_values_at_runner_limits_install(self):
+        name = "n" * installer.SKILL_NAME_MAX_CHARS
+        description = "d" * installer.SKILL_DESCRIPTION_MAX_CHARS
+        skill = self.source / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: '{name}'\ndescription: \"{description}\"\n---\n"
+        )
+        installer.install(self.source, self.home)
+        for root in installer.SKILL_ROOTS:
+            self.assertTrue((self.home / root / name / "SKILL.md").is_file())
+
+    def test_removed_skill_links_are_archived_and_other_skills_kept(self):
+        self.write_skill("old", "Old skill.")
+        installer.install(self.source, self.home)
+        own = self.home / ".agents/skills/own"
+        own.mkdir()
+        foreign = self.home / ".claude/skills/foreign"
+        foreign.symlink_to(own, target_is_directory=True)
+        shutil.rmtree(self.source / "skills/old")
+        backup = installer.install(self.source, self.home)
+        for root in installer.SKILL_ROOTS:
+            self.assertFalse((self.home / root / "old").is_symlink())
+            self.assertTrue((backup / root / "old").is_symlink())
+            self.assertTrue((self.home / root / "demo/SKILL.md").is_file())
+        self.assertTrue(own.is_dir())
+        self.assertEqual(foreign.resolve(), own.resolve())
 
     def test_update_preserves_previous_files_and_unrelated_context(self):
         native = self.home / ".claude/CLAUDE.md"
