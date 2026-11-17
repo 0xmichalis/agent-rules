@@ -27,8 +27,17 @@ previous entry; rollback failures report the retained backup location without
 hiding the installation error. Re-running the installer updates every entry to
 the same content; removing the source worktree does not break installed rules.
 
-Claude's `~/.claude/rules/agent-rules` also points to the installed language rules,
-retaining their file-type filters. Any existing copy or link is backed up first.
+The repository holds only runner-neutral content; the installer maps it into
+each runner's native locations:
+
+| Source | Claude Code | Codex |
+| --- | --- | --- |
+| `rules/scoped/` | `~/.claude/rules/agent-rules` | Linked from `AGENTS.md` |
+| `skills/<name>/` | `~/.claude/skills/<name>` | `~/.agents/skills/<name>` |
+
+Scoped rules keep their `paths:` file filters. Links for skills removed from
+the repository are archived on the next run. Any existing copy or link is
+backed up first.
 
 Hermes personality text outside the managed section is preserved. The installer
 honors `HERMES_HOME`; recognized profiles under that home's `profiles/` receive
@@ -64,11 +73,11 @@ After install, resolve those links under `~/.agents/agent-rules/`.
 | Git history, review, or PR cleanup needs detail | [rules/git.md](rules/git.md) |
 | Operating services or writing a runbook | [rules/operations.md](rules/operations.md) |
 | Performance review | [rules/performance-scout.md](rules/performance-scout.md) |
-| Editing Rust | [.claude/rules/rust.md](.claude/rules/rust.md) |
-| Working on a Solana program | [.claude/rules/solana.md](.claude/rules/solana.md) |
-| Editing Solidity | [.claude/rules/solidity.md](.claude/rules/solidity.md) |
-| Designing indexes or diagnosing a slow query | [.claude/skills/sql-indexes/SKILL.md](.claude/skills/sql-indexes/SKILL.md) |
-| Needing detailed GitHub CLI recipes | [.claude/skills/github-cli/SKILL.md](.claude/skills/github-cli/SKILL.md) |
+| Editing Rust | [rules/scoped/rust.md](rules/scoped/rust.md) |
+| Working on a Solana program | [rules/scoped/solana.md](rules/scoped/solana.md) |
+| Editing Solidity | [rules/scoped/solidity.md](rules/scoped/solidity.md) |
+| Designing indexes or diagnosing a slow query | [skills/sql-indexes/SKILL.md](skills/sql-indexes/SKILL.md) |
+| Needing detailed GitHub CLI recipes | [skills/github-cli/SKILL.md](skills/github-cli/SKILL.md) |
 
 ## Private context
 
@@ -96,7 +105,7 @@ Dual-licensed.
 
 ### GPL v3.0
 
-[.claude/rules/rust.md](.claude/rules/rust.md) is derived from
+[rules/scoped/rust.md](rules/scoped/rust.md) is derived from
 [Canonical's Rust Best Practices](https://canonical.github.io/rust-best-practices/)
 and is licensed under the GNU General Public License v3.0.
 

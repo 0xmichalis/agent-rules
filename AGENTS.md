@@ -73,6 +73,6 @@ Load details only when needed, relative to `~/.agents/agent-rules/` after instal
 | --- | --- |
 | Git and PR lifecycle | [rules/git.md](rules/git.md) |
 | Operations, commands and documentation | [rules/operations.md](rules/operations.md) |
-| Rust | [.claude/rules/rust.md](.claude/rules/rust.md) |
-| Solana programs | [.claude/rules/solana.md](.claude/rules/solana.md) |
-| Solidity | [.claude/rules/solidity.md](.claude/rules/solidity.md) |
+| Rust | [rules/scoped/rust.md](rules/scoped/rust.md) |
+| Solana programs | [rules/scoped/solana.md](rules/scoped/solana.md) |
+| Solidity | [rules/scoped/solidity.md](rules/scoped/solidity.md) |

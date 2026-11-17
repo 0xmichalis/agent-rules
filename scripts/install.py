@@ -11,8 +11,11 @@ import sys
 import tempfile
 
 
-RESOURCES = ("AGENTS.md", "README.md", "rules", ".claude/rules", ".claude/skills")
+RESOURCES = ("AGENTS.md", "README.md", "rules", "skills")
 ENTRIES = (".codex/AGENTS.md", ".claude/CLAUDE.md")
+SCOPED_RULES = "rules/scoped"
+# User skill directories read by Claude Code and Codex.
+SKILL_ROOTS = (".claude/skills", ".agents/skills")
 HERMES_START = "<!-- agent-rules:start -->"
 HERMES_END = "<!-- agent-rules:end -->"
 HERMES_PROFILE_FILES = ("config.yaml", ".env", "SOUL.md", "profile.yaml", "auth.json", "state.db")
@@ -76,6 +79,8 @@ def install(source, home):
                 shutil.copytree(original, copied)
             else:
                 shutil.copy2(original, copied)
+        rules = (payload / "AGENTS.md").read_text(encoding="utf-8")
+        skills = sorted(path.parent for path in payload.glob("skills/*/SKILL.md"))
         replacements = [(target, payload)]
         for index, entry in enumerate(ENTRIES):
             link = stage / ("entry-" + str(index))
@@ -94,7 +99,6 @@ def install(source, home):
             and any((path / name).is_file() or (path / name).is_symlink()
                     for name in HERMES_PROFILE_FILES)
         )
-        rules = (payload / "AGENTS.md").read_text(encoding="utf-8")
         for index, profile in enumerate([hermes_home, *profiles]):
             soul = profile / "SOUL.md"
             existing = soul.read_text(encoding="utf-8") if soul.exists() else ""
@@ -105,10 +109,21 @@ def install(source, home):
             else:
                 prepared.chmod(0o600)
             replacements.append((soul, prepared))
-        if (payload / ".claude/rules").is_dir():
+        if (payload / SCOPED_RULES).is_dir():
             link = stage / "scoped-rules"
-            link.symlink_to(target / ".claude/rules", target_is_directory=True)
+            link.symlink_to(target / SCOPED_RULES, target_is_directory=True)
             replacements.append((home / ".claude/rules/agent-rules", link))
+        names = {skill.name for skill in skills}
+        for root in SKILL_ROOTS:
+            for skill in skills:
+                link = stage / ("skill-" + str(len(replacements)))
+                link.symlink_to(target / "skills" / skill.name, target_is_directory=True)
+                replacements.append((home / root / skill.name, link))
+            installed = home / root
+            for path in sorted(installed.iterdir()) if installed.is_dir() else ():
+                if (path.name not in names and path.is_symlink()
+                        and path.readlink() == target / "skills" / path.name):
+                    replacements.append((path, None))
         try:
             for destination, prepared in replacements:
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -145,6 +160,7 @@ if __name__ == "__main__":
     previous = install(checkout, Path.home())
     print("Installed shared rules from", checkout)
     print("Native entry files:", ", ".join(ENTRIES))
+    print("Skills linked in:", ", ".join(SKILL_ROOTS))
     print("Hermes defaults: managed sections in", hermes_home_path(Path.home()), "and existing profiles")
     if previous:
         print("Previous installation and instructions saved in", previous)

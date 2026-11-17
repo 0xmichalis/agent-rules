@@ -30,9 +30,17 @@ class InstallationTests(unittest.TestCase):
         self.home.mkdir()
         (self.source / "AGENTS.md").write_text("# Shared rules\n")
         (self.source / "private-memory.md").write_text("Keep private\n")
-        rules = self.source / ".claude/rules"
+        rules = self.source / "rules/scoped"
         rules.mkdir(parents=True)
         (rules / "rust.md").write_text("# Rust rules\n")
+        self.write_skill("demo", "Demo skill.")
+
+    def write_skill(self, name, description):
+        skill = self.source / "skills" / name
+        skill.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n"
+        )
 
     def test_all_runners_share_content_and_install_does_not_depend_on_checkout(self):
         installer.install(self.source, self.home)
@@ -48,6 +56,24 @@ class InstallationTests(unittest.TestCase):
             (self.home / ".claude/rules/agent-rules/rust.md").read_text(),
             "# Rust rules\n",
         )
+        for root in installer.SKILL_ROOTS:
+            self.assertIn("# demo\n", (self.home / root / "demo/SKILL.md").read_text())
+
+    def test_removed_skill_links_are_archived_and_other_skills_kept(self):
+        self.write_skill("old", "Old skill.")
+        installer.install(self.source, self.home)
+        own = self.home / ".agents/skills/own"
+        own.mkdir()
+        foreign = self.home / ".claude/skills/foreign"
+        foreign.symlink_to(own, target_is_directory=True)
+        shutil.rmtree(self.source / "skills/old")
+        backup = installer.install(self.source, self.home)
+        for root in installer.SKILL_ROOTS:
+            self.assertFalse((self.home / root / "old").is_symlink())
+            self.assertTrue((backup / root / "old").is_symlink())
+            self.assertTrue((self.home / root / "demo/SKILL.md").is_file())
+        self.assertTrue(own.is_dir())
+        self.assertEqual(foreign.resolve(), own.resolve())
 
     def test_update_preserves_previous_files_and_unrelated_context(self):
         native = self.home / ".claude/CLAUDE.md"
