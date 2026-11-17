@@ -57,6 +57,8 @@ def check_skill(skill):
     fields = dict(re.findall(r"^(name|description):[ \t]*(.*)$", header[1], re.M)) if header else {}
     for field, limit in (("name", SKILL_NAME_MAX_CHARS), ("description", SKILL_DESCRIPTION_MAX_CHARS)):
         value = fields.get(field, "").strip()
+        if len(value) > 1 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
         if not value or value[0] in ">|":
             raise ValueError(f"{label} needs a single-line {field} in its front matter")
         check_length(f"{label} {field}", value, limit)

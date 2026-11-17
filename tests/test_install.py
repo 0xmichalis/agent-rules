@@ -94,6 +94,18 @@ class InstallationTests(unittest.TestCase):
         self.assertFalse((self.home / ".agents/agent-rules").exists())
         self.assertFalse((self.home / ".codex").exists())
 
+    def test_quoted_skill_values_at_runner_limits_install(self):
+        name = "n" * installer.SKILL_NAME_MAX_CHARS
+        description = "d" * installer.SKILL_DESCRIPTION_MAX_CHARS
+        skill = self.source / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: '{name}'\ndescription: \"{description}\"\n---\n"
+        )
+        installer.install(self.source, self.home)
+        for root in installer.SKILL_ROOTS:
+            self.assertTrue((self.home / root / name / "SKILL.md").is_file())
+
     def test_removed_skill_links_are_archived_and_other_skills_kept(self):
         self.write_skill("old", "Old skill.")
         installer.install(self.source, self.home)
