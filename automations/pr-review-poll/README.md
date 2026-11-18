@@ -18,11 +18,12 @@ starts a run while the previous one is still going. Each run has three steps.
 2. Poll. A headless Claude Haiku session in restricted mode searches Slack for
    messages that mention you, starting 30 minutes before the last successful
    poll, because Slack search can return a message minutes after it was posted.
-   Messages already handled in that window are listed in the prompt. A run in
-   which the search did not happen counts as failed and leaves that starting
-   point alone. For each message with a pull request link it runs
-   `pr_review_poll.py submit`. It can run no other command beyond read-only
-   shell built-ins, and it ignores your settings files.
+   Messages already handled in that window are listed in the prompt. It returns
+   the permalink, author and pull request links of each message that links a
+   pull request as structured output. It has no tool that runs commands, and it
+   ignores your settings files. A run that did not make exactly the search it
+   was given, or returned no structured output, counts as failed and leaves
+   that starting point alone.
 3. Submit. The dispatcher validates the permalink, author and pull request URLs
    and ignores messages it has handled. It skips pull requests that are merged
    or closed, yours, opened from a fork or approved by you at the current head.
