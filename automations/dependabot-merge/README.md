@@ -19,7 +19,7 @@ A pull request merges only when all of these hold:
   `0.0.3` to `0.0.4` are major. A group with one major update is skipped, and
   so are versions that are not plain dotted numbers, such as commit SHAs or
   prereleases. The pull request text is never read.
-- Nobody has requested changes.
+- Nobody's latest review requests changes.
 - The head commit has at least one check, and every check passed. Checks
   that an organization adds to every repository, such as secret scanning,
   count, so a repository without its own tests can still merge.
@@ -40,6 +40,7 @@ checks run again.
 ## Requirements
 
 - Linux with a systemd user manager.
+- Python 3.10 or later as `python3`, which the installer needs.
 - `gh` signed in as the account that approves and merges. In an organization
   whose rules require a code owner's review, that account's approval must
   satisfy them.
@@ -93,10 +94,18 @@ Stop merging for an owner with:
 systemctl --user disable --now dependabot-merge@ExampleOrg.timer
 ```
 
+Stop a run that is in progress with the following. Merges that GitHub has
+already accepted stay merged.
+
+```bash
+systemctl --user stop dependabot-merge@ExampleOrg.service
+```
+
 ## Limits
 
-- It runs only while you are logged in. A run missed while the machine was off
-  starts when the timer is next active.
+- It runs while your systemd user manager runs, which without lingering means
+  while you are logged in. A run missed while the machine was off starts when
+  the timer is next active.
 - A run with a failed approval or merge exits with an error, which
   `systemctl --user list-units --failed` shows. The next run retries.
 - Pull requests whose head has no checks at all are never merged.

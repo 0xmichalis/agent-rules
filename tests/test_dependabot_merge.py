@@ -252,6 +252,11 @@ class BlockerTests(unittest.TestCase):
             with self.subTest(events=events):
                 self.assertEqual(merge.blockers(pull(timelineItems=events), ME), rewritten)
 
+    def test_a_latest_review_requesting_changes_blocks_without_a_review_decision(self):
+        review = {"state": "CHANGES_REQUESTED", "author": {"login": "teammate"}, "commit": {"oid": "d" * 40}}
+        pr = pull(reviewDecision=None, latestOpinionatedReviews={"nodes": [review]})
+        self.assertEqual(merge.blockers(pr, ME), "changes requested")
+
     def test_your_approval_at_the_head_that_is_not_enough_blocks(self):
         mine = {"state": "APPROVED", "author": {"login": ME.upper()}, "commit": {"oid": HEAD}}
         pr = pull(latestOpinionatedReviews={"nodes": [mine]})
@@ -312,13 +317,13 @@ class RunTests(unittest.TestCase):
         self.assertEqual(records[0]["approve"], True)
 
     def test_a_failed_merge_is_reported_and_the_run_continues_with_another_repository(self):
-        github = FakeGitHub([pull(1), pull(2), pull(3, repo="Org/infra")], fail_merge={1})
+        github = FakeGitHub([pull(1), pull(3, repo="Org/infra")], fail_merge={1})
         code, records = run(github)
         self.assertEqual(code, 1)
-        self.assertEqual([call[2] for call in writes(github) if call[0] == "merge"], [1, 2, 3])
+        self.assertEqual([call[2] for call in writes(github) if call[0] == "merge"], [1, 3])
         failed = next(record for record in records if record["action"] == "failed")
         self.assertEqual((failed["pr"], failed["approved"]), ("https://github.com/Org/service/pull/1", True))
-        self.assertEqual(records[-1]["merged"], 2)
+        self.assertEqual(records[-1]["merged"], 1)
 
     def test_a_pull_request_that_changed_since_listing_is_skipped(self):
         changed = pull(1, headRefOid="f" * 40, commits={"totalCount": 1, "nodes": [commit(oid="f" * 40, checks="PENDING")]})
@@ -341,6 +346,13 @@ class RunTests(unittest.TestCase):
         self.assertEqual(records[0]["action"], "failed")
         self.assertTrue(records[0]["error"].startswith("KeyError"))
         self.assertEqual(writes(github)[-1], ("merge", "Org/infra", 2, HEAD, "squash"))
+
+    def test_a_failed_merge_still_reserves_its_repository_for_the_run(self):
+        github = FakeGitHub([pull(1), pull(2)], fail_merge={1})
+        code, records = run(github)
+        self.assertEqual(code, 1)
+        self.assertEqual([call[2] for call in writes(github) if call[0] == "merge"], [1])
+        self.assertEqual(records[1]["reason"], "another update merged in this repository during this run")
 
     def test_a_failed_approval_is_not_reported_as_approved(self):
         github = FakeGitHub([pull(1)])

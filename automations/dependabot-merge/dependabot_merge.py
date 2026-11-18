@@ -182,7 +182,10 @@ def blockers(pr, viewer):
     reason = update_blocker(head["message"])
     if reason:
         return reason
-    if pr["reviewDecision"] == "CHANGES_REQUESTED":
+    # Without a review requirement GitHub may leave reviewDecision empty, so check each review too.
+    if pr["reviewDecision"] == "CHANGES_REQUESTED" or any(
+        review.get("state") == "CHANGES_REQUESTED" for review in pr["latestOpinionatedReviews"]["nodes"]
+    ):
         return "changes requested"
     if pr["reviewDecision"] == "REVIEW_REQUIRED" and approved_by(pr, viewer):
         return "needs another approval besides yours"
@@ -278,7 +281,7 @@ def run(owner, dry_run, github=None):
         return 1
     merged_repositories, failures, merged = set(), 0, 0
     for listed in pulls:
-        approved = False
+        approved, wrote = False, False
         try:
             repository = listed["repository"]["nameWithOwner"]
             reason = blockers(listed, viewer)
@@ -299,12 +302,17 @@ def run(owner, dry_run, github=None):
                 log(pr=pr["url"], action="would_merge", approve=approve, method=method, head=pr["headRefOid"])
                 merged_repositories.add(repository)
                 continue
+            # A write that fails may still have reached GitHub, for example on a timeout, so
+            # the repository counts as handled for this run either way.
+            wrote = True
             if approve:
                 github.approve(repository, pr["number"], pr["headRefOid"])
                 approved = True
             github.merge(repository, pr["number"], pr["headRefOid"], method)
         except (GitHubError, KeyError, TypeError, AttributeError, IndexError, ValueError) as error:
             failures += 1
+            if wrote:
+                merged_repositories.add(repository)
             log(pr=listed.get("url"), action="failed", approved=approved, error=f"{type(error).__name__}: {error}")
             continue
         merged += 1
