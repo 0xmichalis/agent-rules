@@ -8,7 +8,8 @@ per run, so other updates that now conflict are rebased by Dependabot and checke
 before they merge. When the repository still requires a review, it approves the exact head
 commit first. Version changes come from Dependabot's commit message, never the pull
 request text. Only a pull request with a single GitHub-signed Dependabot commit, on a branch
-nobody else rewrote, is trusted.
+nobody else rewrote, is trusted, and a check from the repository's own workflows must pass.
+Repositories named with --skip-repo, such as ones that deploy on every merge, are left alone.
 """
 
 import argparse
@@ -48,7 +49,9 @@ fragment pull on PullRequest {
     author { email }
     committer { email }
     signature { isValid wasSignedByGitHub }
-    statusCheckRollup { state }
+    statusCheckRollup { state contexts(first: 50) { nodes {
+      ... on CheckRun { conclusion checkSuite { workflowRun { file { repositoryName } } } }
+    } } }
   } } }
 }
 """
@@ -166,6 +169,20 @@ def approved_by(pr, login):
     )
 
 
+def own_check_passed(repository, checks):
+    """Whether a check run from a workflow file kept in this repository passed.
+
+    Commit statuses, app checks and workflows kept in another repository, such as the ones an
+    organization ruleset requires everywhere, do not show that the repository's own tests ran.
+    """
+    for check in checks:
+        workflow_run = (check.get("checkSuite") or {}).get("workflowRun") or {}
+        source = (workflow_run.get("file") or {}).get("repositoryName") or ""
+        if check.get("conclusion") == "SUCCESS" and source.lower() == repository.lower():
+            return True
+    return False
+
+
 def blockers(pr, viewer):
     """Return the first reason not to merge this pull request, or None."""
     repository = pr["repository"]
@@ -192,6 +209,8 @@ def blockers(pr, viewer):
     checks = (head.get("statusCheckRollup") or {}).get("state")
     if checks != "SUCCESS":
         return f"checks {checks.lower()}" if checks else "no checks"
+    if not own_check_passed(repository["nameWithOwner"], head["statusCheckRollup"]["contexts"]["nodes"]):
+        return "no passing check from a workflow in this repository"
     if pr["mergeable"] != "MERGEABLE":
         return f"mergeable state {pr['mergeable'].lower()}"
     if pr["mergeStateStatus"] == "BEHIND":
@@ -272,8 +291,9 @@ def open_pull_requests(github, owner):
         cursor = page["endCursor"]
 
 
-def run(owner, dry_run, github=None):
+def run(owner, dry_run, skip_repos=(), github=None):
     github = github or GitHub()
+    skip_repos = {name.lower() for name in skip_repos}
     try:
         viewer, pulls = open_pull_requests(github, owner)
     except (GitHubError, KeyError, TypeError, ValueError) as error:
@@ -284,7 +304,10 @@ def run(owner, dry_run, github=None):
         approved, wrote = False, False
         try:
             repository = listed["repository"]["nameWithOwner"]
-            reason = blockers(listed, viewer)
+            if repository.split("/")[1].lower() in skip_repos:
+                reason = "repository is on the skip list"
+            else:
+                reason = blockers(listed, viewer)
             if not reason and repository in merged_repositories:
                 reason = "another update merged in this repository during this run"
             if reason:
@@ -326,10 +349,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--owner", required=True, help="GitHub organization or user whose repositories to check")
     parser.add_argument("--dry-run", action="store_true", help="print what would merge without approving or merging")
+    parser.add_argument(
+        "--skip-repo", action="append", default=[], metavar="NAME",
+        help="name of a repository under --owner to leave alone, such as one that deploys on every merge; repeatable",
+    )
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", args.owner):
         parser.error(f"--owner must be a GitHub organization or user name, not {args.owner!r}")
-    return run(args.owner, args.dry_run)
+    for name in args.skip_repo:
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", name):
+            parser.error(f"--skip-repo takes a repository name without its owner, not {name!r}")
+    return run(args.owner, args.dry_run, args.skip_repo)
 
 
 if __name__ == "__main__":

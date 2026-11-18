@@ -65,12 +65,23 @@ updated-dependencies:
 """
 
 
+def check_run(workflow_repo="Org/service", conclusion="SUCCESS"):
+    """A check run from a workflow file in workflow_repo, or from an app when it is None."""
+    workflow_run = {"file": {"repositoryName": workflow_repo}} if workflow_repo else None
+    return {"conclusion": conclusion, "checkSuite": {"workflowRun": workflow_run}}
+
+
+# What an organization adds everywhere: a ruleset's required workflow, an app check and a status.
+ORG_CHECKS = [check_run("Org/infrastructure"), check_run(None), {}]
+
+
 def commit(oid=HEAD, message=SINGLE, author=merge.DEPENDABOT_EMAIL, committer=merge.GITHUB_EMAIL,
-           signed=True, checks="SUCCESS"):
+           signed=True, checks="SUCCESS", runs=None):
+    runs = [check_run(), *ORG_CHECKS] if runs is None else runs
     return {"commit": {
         "oid": oid, "message": message, "author": {"email": author}, "committer": {"email": committer},
         "signature": {"isValid": signed, "wasSignedByGitHub": signed},
-        "statusCheckRollup": {"state": checks} if checks else None,
+        "statusCheckRollup": {"state": checks, "contexts": {"nodes": runs}} if checks else None,
     }}
 
 
@@ -85,7 +96,7 @@ def pull(number=1, repo="Org/service", created="2026-11-01T00:00:00Z", **changes
         },
         "latestOpinionatedReviews": {"nodes": []},
         "timelineItems": {"nodes": []},
-        "commits": {"totalCount": 1, "nodes": [commit()]},
+        "commits": {"totalCount": 1, "nodes": [commit(runs=[check_run(repo), *ORG_CHECKS])]},
     }
     for key, value in changes.items():
         if key in pr["repository"]:
@@ -140,10 +151,10 @@ class FakeGitHub:
             raise merge.GitHubError("gh api failed: Pull Request is not mergeable (HTTP 405)")
 
 
-def run(github, dry_run=False, owner="Org"):
+def run(github, dry_run=False, owner="Org", skip_repos=()):
     output = io.StringIO()
     with redirect_stdout(output):
-        code = merge.run(owner, dry_run, github=github)
+        code = merge.run(owner, dry_run, skip_repos, github=github)
     return code, [json.loads(line) for line in output.getvalue().splitlines()]
 
 
@@ -223,6 +234,9 @@ class BlockerTests(unittest.TestCase):
             "checks failure": pull(commits={"totalCount": 1, "nodes": [commit(checks="FAILURE")]}),
             "checks pending": pull(commits={"totalCount": 1, "nodes": [commit(checks="PENDING")]}),
             "no checks": pull(commits={"totalCount": 1, "nodes": [commit(checks=None)]}),
+            "no passing check from a workflow in this repository": pull(
+                commits={"totalCount": 1, "nodes": [commit(runs=ORG_CHECKS)]}
+            ),
             "mergeable state conflicting": pull(mergeable="CONFLICTING"),
             "behind its base branch, which must be up to date": pull(mergeStateStatus="BEHIND"),
             "no merge method allowed": pull(squashMergeAllowed=False, mergeCommitAllowed=False, rebaseMergeAllowed=False),
@@ -230,6 +244,19 @@ class BlockerTests(unittest.TestCase):
         for reason, pr in cases.items():
             with self.subTest(reason=reason):
                 self.assertEqual(merge.blockers(pr, ME), reason)
+
+    def test_only_a_successful_check_from_the_repositorys_own_workflow_counts(self):
+        cases = {
+            "own workflow skipped": ([check_run(conclusion="SKIPPED"), *ORG_CHECKS], False),
+            "own workflow neutral": ([check_run(conclusion="NEUTRAL"), *ORG_CHECKS], False),
+            "workflow in another repository": ([check_run("Org/service-tools")], False),
+            "no checks listed": ([], False),
+            "owner and name differ only in case": ([check_run("org/Service")], True),
+        }
+        for case, (runs, passes) in cases.items():
+            with self.subTest(case=case):
+                pr = pull(commits={"totalCount": 1, "nodes": [commit(runs=runs)]})
+                self.assertEqual(merge.blockers(pr, ME) is None, passes)
 
     def test_a_commit_from_someone_else_blocks_even_when_github_signed_it(self):
         pr = pull(commits={"totalCount": 1, "nodes": [commit(author="me@example.com")]})
@@ -315,6 +342,16 @@ class RunTests(unittest.TestCase):
         self.assertEqual((code, writes(github)), (0, []))
         self.assertEqual([record["action"] for record in records], ["would_merge", "skipped", "skipped", "finished"])
         self.assertEqual(records[0]["approve"], True)
+
+    def test_skipped_repositories_are_left_alone_in_any_case(self):
+        github = FakeGitHub([pull(1), pull(2, repo="Org/infra")])
+        code, records = run(github, skip_repos=["SERVICE"])
+        self.assertEqual(code, 0)
+        self.assertEqual(writes(github), [("approve", "Org/infra", 2, HEAD), ("merge", "Org/infra", 2, HEAD, "squash")])
+        self.assertNotIn(("pull", "Org/service", 1), github.calls)
+        self.assertEqual(records[0], {
+            "action": "skipped", "pr": "https://github.com/Org/service/pull/1", "reason": "repository is on the skip list",
+        })
 
     def test_a_failed_merge_is_reported_and_the_run_continues_with_another_repository(self):
         github = FakeGitHub([pull(1), pull(3, repo="Org/infra")], fail_merge={1})
@@ -428,10 +465,20 @@ class MainTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     merge.main(["--owner", owner])
 
-    def test_main_passes_owner_and_dry_run(self):
+    def test_skip_repo_must_be_a_repository_name_without_its_owner(self):
+        for name in ["Org/repo", "", "repo name", "a" * 101]:
+            with self.subTest(name=name), redirect_stdout(io.StringIO()), unittest.mock.patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    merge.main(["--owner", "ExampleOrg", "--skip-repo", name])
+
+    def test_main_passes_owner_dry_run_and_skipped_repositories(self):
         with unittest.mock.patch.object(merge, "run", return_value=0) as runner:
             self.assertEqual(merge.main(["--owner", "ExampleOrg", "--dry-run"]), 0)
-        runner.assert_called_once_with("ExampleOrg", True)
+            merge.main(["--owner", "ExampleOrg", "--skip-repo", "web.app", "--skip-repo", "api_v2"])
+        self.assertEqual(runner.call_args_list, [
+            unittest.mock.call("ExampleOrg", True, []),
+            unittest.mock.call("ExampleOrg", False, ["web.app", "api_v2"]),
+        ])
 
 
 if __name__ == "__main__":

@@ -20,9 +20,12 @@ A pull request merges only when all of these hold:
   so are versions that are not plain dotted numbers, such as commit SHAs or
   prereleases. The pull request text is never read.
 - Nobody's latest review requests changes.
-- The head commit has at least one check, and every check passed. Checks
-  that an organization adds to every repository, such as secret scanning,
-  count, so a repository without its own tests can still merge.
+- Every check on the head commit passed, and at least one of them succeeded
+  in a GitHub Actions workflow kept in the repository itself. Checks that an
+  organization adds everywhere, such as a ruleset's required workflow from
+  another repository, apps and commit statuses, must pass too but are not
+  enough on their own, so a repository without its own CI never merges.
+- The repository is not on the owner's skip list.
 - GitHub reports no merge conflict, and the branch is not behind a base that
   must be up to date.
 
@@ -63,6 +66,17 @@ Check what the job would do now, without approving or merging. Replace
 
 Each line is JSON: `would_merge` for a pull request the job would merge, and
 `skipped` with the reason for the rest.
+
+A merge into a repository whose default branch deploys automatically is a
+deploy. Put such repositories on the owner's skip list, which the service reads
+from `~/.config/dependabot-merge/<owner>.env`. For example,
+`~/.config/dependabot-merge/ExampleOrg.env` could hold:
+
+```text
+DEPENDABOT_MERGE_ARGS=--skip-repo web-app --skip-repo api
+```
+
+Pass the same `--skip-repo` options to a dry run to check the list.
 
 Link the service and timer templates:
 
@@ -108,7 +122,8 @@ systemctl --user stop dependabot-merge@ExampleOrg.service
   the timer is next active.
 - A run with a failed approval or merge exits with an error, which
   `systemctl --user list-units --failed` shows. The next run retries.
-- Pull requests whose head has no checks at all are never merged.
+- The skip list is the only guard against deploys. A repository that starts
+  deploying on merge is merged into until you add it.
 - In a repository that requires up-to-date branches, a pull request behind its
   base waits until you comment `@dependabot rebase`; Dependabot rebases on its
   own only when the pull request conflicts.
