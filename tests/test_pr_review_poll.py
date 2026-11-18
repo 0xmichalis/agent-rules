@@ -3,6 +3,7 @@ from contextlib import redirect_stderr
 import io
 import json
 from pathlib import Path
+import re
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -59,7 +60,8 @@ class FakeHost(poll.Host):
         self.panes = {}
         self.calls = []
         self.poll_returncode = 0
-        self.poll_searches = True
+        self.searches = lambda asked: [asked]
+        self.poll_output = {"requests": []}
         self.poll_timeout = False
         self.notifications = []
         self.fail_launch = None
@@ -103,13 +105,14 @@ class FakeHost(poll.Host):
         self.calls.append(("poll", prompt, tuple(allowed_tools), cwd, env))
         if self.poll_timeout:
             raise poll.subprocess.TimeoutExpired(["claude"], poll.POLL_TIMEOUT_SECONDS)
-        search = {"type": "tool_use", "name": poll.SLACK_SEARCH_TOOL, "input": {"query": "q", "after": "1"}}
-        content = [{"type": "text", "text": "searching"}] + ([search] if self.poll_searches else [])
+        asked = json.loads(re.search(r"these arguments:\n   (.*)\n", prompt).group(1))
+        searches = [
+            {"type": "tool_use", "name": poll.SLACK_SEARCH_TOOL, "input": search} for search in self.searches(asked)
+        ]
         events = [
             {"type": "system", "subtype": "init"},
-            {"type": "assistant", "message": {"content": content}},
-            {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}]}},
-            {"type": "result", "result": "no matches", "total_cost_usd": 0.01},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "searching"}, *searches]}},
+            {"type": "result", "result": "done", "structured_output": self.poll_output, "total_cost_usd": 0.01},
         ]
         stdout = "\n".join(json.dumps(event) for event in events) + "\nnot json\n[]\n"
         return SimpleNamespace(returncode=self.poll_returncode, stdout=stdout, stderr="boom")
@@ -286,20 +289,48 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(self.dispatcher.run(), 0)
         self.assertEqual(self.host.calls[-1][0], "poll")
 
-    def test_submit_command_reports_failures_without_a_traceback(self):
+    def test_poll_requests_are_submitted_and_failures_are_logged_without_a_traceback(self):
         self.host.prs[PR1] = None
+        self.host.poll_output = {"requests": [
+            {"permalink": LINK1, "author": "U0TEAMMATE", "prs": [PR1]},
+            {"permalink": "https://evil.example/x", "author": "U0X", "prs": [PR2]},
+            {"permalink": LINK2, "author": "U0X", "prs": PR2},
+            {"permalink": LINK3, "author": 7, "prs": [PR2]},
+            [LINK4, PR2],
+        ]}
         environ = {**ENVIRON, "PR_REVIEW_POLL_STATE_DIR": str(self.state_dir)}
-        output = io.StringIO()
         with unittest.mock.patch.dict(poll.os.environ, environ), \
-                unittest.mock.patch.object(poll, "Host", lambda: self.host), \
-                unittest.mock.patch("sys.stdout", output):
-            code = poll.main(["submit", "--permalink", LINK1, "--author", "U0TEAMMATE", "--pr", PR1])
-            self.assertEqual(code, 1)
-            self.assertIn("failed, will retry on a later poll: gh pr view failed: HTTP 502", output.getvalue())
-            code = poll.main(["submit", "--permalink", "https://evil.example/x", "--author", "U0X", "--pr", PR1])
-            self.assertEqual(code, 2)
+                unittest.mock.patch.object(poll, "Host", lambda: self.host):
+            self.assertEqual(poll.main(["run"]), 0)
         self.assertEqual(self.state()["seen"], {})
-        self.assertEqual([(e["event"], e.get("step")) for e in self.events()], [("error", "submit"), ("rejected", None)])
+        self.assertEqual(self.host.of("launch"), [])
+        self.assertEqual(
+            [(e["event"], e.get("step")) for e in self.events() if e["event"] in ("error", "rejected")],
+            [("error", "submit")] + [("rejected", None)] * 4,
+        )
+        self.assertIn("gh pr view failed: HTTP 502", self.events()[1]["error"])
+
+    def test_poll_returns_slack_values_as_data_and_cannot_run_commands(self):
+        self.host.poll_output = {"requests": [
+            {"permalink": LINK1, "author": "U0TEAMMATE", "prs": [f"{PR1}/';printf${{IFS}}INJECTED;#"]},
+        ]}
+        self.assertEqual(self.dispatcher.run(), 0)
+        [(_, prompt, allowed, _, _)] = self.host.of("poll")
+        self.assertEqual(allowed, (poll.SLACK_SEARCH_TOOL,))
+        self.assertNotIn("Bash", prompt)
+        [(_, _, _, _, _, review, _)] = self.host.of("launch")
+        self.assertTrue(review.startswith(f"Review {PR1}. The request came from Slack: {LINK1} . "))
+        self.assertNotIn("INJECTED", review)
+        cursor = self.state()["cursor"]
+        self.time[0] += 60
+        for output in (None, {}, {"requests": "none"}):
+            self.host.poll_output = output
+            self.assertEqual(self.dispatcher.run(), 1)
+        self.assertEqual(self.state()["cursor"], cursor)
+        self.assertEqual(
+            [e["reason"] for e in self.events() if e["event"] == "poll_failed"],
+            ["the poll returned no list of requests"] * 3,
+        )
 
     def test_busy_agents_cap_new_reviews_and_queue_drains_when_one_finishes(self):
         self.submit(LINK1, PR1)
@@ -313,6 +344,22 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(len(self.host.of("launch")), 4)
         self.assertEqual(self.state()["queue"], [])
         self.assertIn(PR4, self.state()["sessions"]["tab-4:leaf"]["prs"])
+
+    def test_request_waiting_for_a_free_slot_alerts_when_stuck(self):
+        for link, pr in ((LINK1, PR1), (LINK2, PR2), (LINK3, PR3)):
+            self.submit(link, pr)
+        self.assertEqual(self.submit(LINK4, PR4), "queued infra#4")
+        self.housekeeping(advance=poll.STALE_ALERT_SECONDS - 1)
+        self.assertEqual(self.host.notifications, [])
+        self.housekeeping(advance=1)
+        self.housekeeping(advance=60)
+        [(title, body)] = self.host.notifications
+        self.assertEqual(title, "PR review sessions are not starting")
+        self.assertIn("1 review request(s) waiting for over 15 minutes: 3 reviews are still working. See", body)
+        self.host.idle("tab-1:leaf")
+        self.housekeeping()
+        self.assertEqual(self.state()["queue"], [])
+        self.assertIsNone(self.state()["queue_alerted"])
 
     def test_queued_request_survives_a_github_failure(self):
         for link, pr in ((LINK1, PR1), (LINK2, PR2), (LINK3, PR3), (LINK4, PR4)):
@@ -408,19 +455,15 @@ class DispatcherTests(unittest.TestCase):
         })
         self.assertIn(f"   {arguments}\n", prompt)
         self.assertIn("not in this list of messages already handled: none\n", prompt)
-        self.assertIn(f"{poll.SCRIPT} submit --permalink", prompt)
-        self.assertEqual(allowed, (poll.SLACK_SEARCH_TOOL, f"Bash({poll.SCRIPT} *)"))
+        self.assertEqual(allowed, (poll.SLACK_SEARCH_TOOL,))
         self.assertEqual(cwd, str(self.state_dir))
-        self.assertEqual(env["PR_REVIEW_POLL_STATE_DIR"], str(self.state_dir))
-        self.assertEqual(env["PR_REVIEW_POLL_DRY_RUN"], "")
         self.assertEqual(env["MCP_CONNECTION_NONBLOCKING"], "false")
         cursor = self.state()["cursor"]
         self.assertEqual(cursor, self.time[0])
         polled = self.events()[-1]
         self.assertEqual(
-            {key: polled[key] for key in ("event", "searches", "commands", "result", "cost_usd")},
-            {"event": "polled", "searches": [{"query": "q", "after": "1"}], "commands": 1,
-             "result": "no matches", "cost_usd": 0.01},
+            {key: polled[key] for key in ("event", "searches", "result", "cost_usd")},
+            {"event": "polled", "searches": [json.loads(arguments)], "result": "done", "cost_usd": 0.01},
         )
         self.time[0] += 60
         self.host.poll_returncode = 1
@@ -430,6 +473,49 @@ class DispatcherTests(unittest.TestCase):
         self.dispatcher.run(since=1_793_900_000)
         self.assertIn('"after": "1793900000"', self.host.of("poll")[-1][1])
         self.assertEqual(self.state()["cursor"], cursor)
+
+    def test_failing_first_polls_keep_their_start_and_alert(self):
+        first = self.time[0]
+        self.host.poll_returncode = 1
+        self.assertEqual(self.dispatcher.run(since=first - 3600), 1)
+        self.assertIsNone(self.state()["cursor"])
+        for minute in range(16):
+            self.time[0] = first + minute * 60
+            self.assertEqual(self.dispatcher.run(), 1)
+            self.assertIn(f'"after": "{int(first) - 1800}"', self.host.of("poll")[-1][1])
+        self.assertEqual(self.state()["cursor"], first)
+        [(title, body)] = self.host.notifications
+        self.assertEqual(title, "PR review poll is failing")
+        self.assertIn("No successful Slack poll for 15 minutes: claude exited with 1: boom.", body)
+        self.host.poll_returncode = 0
+        self.assertEqual(self.dispatcher.run(), 0)
+        self.assertEqual(self.state()["cursor"], self.time[0])
+
+    def test_poll_counts_only_the_search_it_asked_for(self):
+        self.dispatcher.run()
+        cursor = self.state()["cursor"]
+        self.time[0] += 60
+        self.host.poll_output = {"requests": [{"permalink": LINK1, "author": "U0TEAMMATE", "prs": [PR1]}]}
+        escaped = lambda asked: {**asked, "query": asked["query"].replace("<", "&lt;").replace(">", "&gt;")}
+        for searches in (
+            lambda asked: [],
+            lambda asked: [escaped(asked)],
+            lambda asked: [{**asked, "after": "1"}],
+            lambda asked: [{key: value for key, value in asked.items() if key != "sort"}],
+            lambda asked: [{**asked, "channel": "C01ABC"}],
+        ):
+            self.host.searches = searches
+            self.assertEqual(self.dispatcher.run(), 1)
+        self.assertEqual(self.state()["cursor"], cursor)
+        self.assertEqual(self.host.of("launch"), [])
+        self.assertEqual(
+            [e["reason"] for e in self.events() if e["event"] == "poll_failed"],
+            ["the Slack search did not run with the given arguments"] * 5,
+        )
+        self.host.searches = lambda asked: [escaped(asked), asked, {**asked, "cursor": "page-2"}]
+        self.assertEqual(self.dispatcher.run(), 0)
+        self.assertEqual(self.state()["cursor"], self.time[0])
+        self.assertEqual(len(self.host.of("launch")), 1)
 
     def test_poll_lists_messages_already_handled_inside_its_search_window(self):
         self.time[0] = 1_793_966_400.0 + 600
@@ -447,7 +533,7 @@ class DispatcherTests(unittest.TestCase):
     def test_poll_without_a_slack_search_fails_and_long_outages_alert_hourly(self):
         self.dispatcher.run()
         cursor = self.state()["cursor"]
-        self.host.poll_searches = False
+        self.host.searches = lambda asked: []
         for minute in range(1, 16):
             self.time[0] = cursor + minute * 60
             self.assertEqual(self.dispatcher.run(), 1)
@@ -455,7 +541,7 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(len(self.host.notifications), 1)
         title, body = self.host.notifications[0]
         self.assertEqual(title, "PR review poll is failing")
-        self.assertIn("No successful Slack poll for 15 minutes: the Slack search did not run.", body)
+        self.assertIn("No successful Slack poll for 15 minutes: the Slack search did not run with the given", body)
         self.host.poll_timeout = True
         self.time[0] = cursor + 15 * 60 + poll.ALERT_REPEAT_SECONDS - 1
         self.assertEqual(self.dispatcher.run(), 1)
@@ -465,7 +551,7 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(len(self.host.notifications), 2)
         self.assertIn("claude did not finish within 300 seconds", self.host.notifications[1][1])
         self.host.poll_timeout = False
-        self.host.poll_searches = True
+        self.host.searches = lambda asked: [asked]
         self.assertEqual(self.dispatcher.run(), 0)
         self.assertEqual(self.state()["alerted"], None)
         self.assertEqual(self.state()["cursor"], self.time[0])
@@ -477,13 +563,15 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(self.submit(LINK3, PR2), "started dry-run-2 for service#2")
         self.host.prs[PR1]["state"] = "MERGED"
         self.housekeeping(advance=poll.PR_CHECK_INTERVAL_SECONDS)
+        self.host.poll_output = {"requests": [{"permalink": LINK4, "author": "U0TEAMMATE", "prs": [PR4]}]}
         self.dispatcher.run()
         outward = {"launch", "rename", "send", "close", "agents"}
         self.assertEqual([call[0] for call in self.host.calls if call[0] in outward], [])
-        self.assertEqual(self.host.of("poll")[-1][4]["PR_REVIEW_POLL_DRY_RUN"], "1")
         events = [event["event"] for event in self.events()]
         self.assertEqual(
-            events, ["started", "submitted", "would_wake", "submitted", "started", "submitted", "retired", "polled"]
+            events,
+            ["started", "submitted", "would_wake", "submitted", "started", "submitted", "retired", "polled",
+             "started", "submitted"],
         )
 
     def test_configuration_is_required_and_checked(self):
@@ -507,18 +595,21 @@ class HostTests(unittest.TestCase):
         body = {"ok": ok, "result": result} if ok else {"ok": False, "error": error}
         return SimpleNamespace(returncode=returncode, stdout=json.dumps(body), stderr="")
 
-    def test_poll_runs_haiku_restricted_with_only_slack_search_and_the_dispatcher(self):
+    def test_poll_runs_haiku_restricted_with_only_slack_search_and_structured_output(self):
         host = poll.Host()
         with unittest.mock.patch.object(host, "run") as run:
-            host.poll("prompt", ["slack", "Bash(/x *)"], cwd="/state", env={"A": "1"})
+            host.poll("prompt", ["slack"], cwd="/state", env={"A": "1"})
+        command = run.call_args.args[0]
         self.assertEqual(
-            run.call_args.args[0],
+            command,
             [
                 "claude", "-p", "--restricted", "--model", "claude-haiku-5-5", "--effort", "low",
-                "--permission-mode", "dontAsk", "--tools", "Bash,ToolSearch", "--no-session-persistence",
-                "--output-format", "stream-json", "--verbose", "--allowedTools", "slack", "Bash(/x *)",
+                "--permission-mode", "dontAsk", "--tools", "ToolSearch", "--no-session-persistence",
+                "--output-format", "stream-json", "--verbose", "--json-schema", json.dumps(poll.POLL_SCHEMA),
+                "--allowedTools", "slack",
             ],
         )
+        self.assertFalse([arg for arg in command if "Bash" in arg])
         self.assertEqual(
             run.call_args.kwargs,
             {"cwd": "/state", "input_text": "prompt", "timeout": poll.POLL_TIMEOUT_SECONDS, "env": {"A": "1"}},
