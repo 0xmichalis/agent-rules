@@ -1,0 +1,11 @@
+[Unit]
+Description=Merge passing patch and minor Dependabot pull requests for %i
+Documentation=https://github.com/0xmichalis/agent-rules/tree/main/automations/dependabot-merge
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Optional per-owner options, such as DEPENDABOT_MERGE_ARGS=--skip-repo NAME.
+EnvironmentFile=-%h/.config/dependabot-merge/%i.env
+ExecStart=%h/.agents/agent-rules/automations/dependabot-merge/dependabot_merge.py --owner %i $DEPENDABOT_MERGE_ARGS
+TimeoutStartSec=15min
