@@ -85,6 +85,12 @@ After install, resolve those links under `~/.agents/agent-rules/`.
 | Designing indexes or diagnosing a slow query | [skills/sql-indexes/SKILL.md](skills/sql-indexes/SKILL.md) |
 | Needing detailed GitHub CLI recipes | [skills/github-cli/SKILL.md](skills/github-cli/SKILL.md) |
 
+## Automations
+
+[automations/pr-review-poll](automations/pr-review-poll/README.md) starts a
+Claude Code review session when someone asks for your review in Slack. The
+installer copies it with the rules; enabling it is a separate, opt-in step.
+
 ## Private context
 
 Keep project memory, organization rules, credentials and session histories out of

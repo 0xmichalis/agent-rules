@@ -122,6 +122,17 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(own.is_dir())
         self.assertEqual(foreign.resolve(), own.resolve())
 
+    def test_automations_install_as_executable_files_outside_the_checkout(self):
+        script = self.source / "automations/poller/poll.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/usr/bin/env python3\n")
+        script.chmod(0o755)
+        installer.install(self.source, self.home)
+        shutil.rmtree(self.source)
+        installed = self.home / ".agents/agent-rules/automations/poller/poll.py"
+        self.assertEqual(installed.read_text(), "#!/usr/bin/env python3\n")
+        self.assertTrue(os.access(installed, os.X_OK))
+
     def test_update_preserves_previous_files_and_unrelated_context(self):
         native = self.home / ".claude/CLAUDE.md"
         native.parent.mkdir()

@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 
-RESOURCES = ("AGENTS.md", "README.md", "rules", "skills")
+RESOURCES = ("AGENTS.md", "README.md", "rules", "skills", "automations")
 ENTRIES = (".codex/AGENTS.md", ".claude/CLAUDE.md")
 SCOPED_RULES = "rules/scoped"
 # User skill directories read by Claude Code and Codex.
