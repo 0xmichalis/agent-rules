@@ -10,20 +10,24 @@ GitHub owner, organization or user, every 30 minutes. It acts as the account
 A pull request merges only when all of these hold:
 
 - Dependabot opened it, it is not a draft, and you have write access.
-- Every commit is Dependabot's and signed by GitHub. A commit from anyone
-  else, including an **Update branch** merge, blocks it until you comment
-  `@dependabot recreate`.
+- It has a single commit, which Dependabot wrote and GitHub signed, and
+  nobody but Dependabot has force-pushed, deleted or restored its branch. A
+  commit from anyone else, including an **Update branch** merge, blocks it
+  until you comment `@dependabot recreate`.
 - Every update in Dependabot's commit metadata is a patch or minor upgrade.
   The first non-zero version component counts as major, so `0.8` to `0.9` and
   `0.0.3` to `0.0.4` are major. A group with one major update is skipped, and
   so are versions that are not plain dotted numbers, such as commit SHAs or
   prereleases. The pull request text is never read.
 - Nobody has requested changes.
-- The head commit has at least one check, and every check passed.
+- The head commit has at least one check, and every check passed. Checks
+  that an organization adds to every repository, such as secret scanning,
+  count, so a repository without its own tests can still merge.
 - GitHub reports no merge conflict, and the branch is not behind a base that
   must be up to date.
 
-If the repository still requires a review, the job first approves the exact
+Right before writing, the job reads the pull request again and applies the
+same rules. If the repository still requires a review, it approves the exact
 head commit with a comment that names the automation. It skips a pull request
 that it has already approved at that commit and that still needs another
 review. It then merges that commit by squash, merge commit or rebase, in that
@@ -95,7 +99,7 @@ systemctl --user disable --now dependabot-merge@ExampleOrg.timer
   starts when the timer is next active.
 - A run with a failed approval or merge exits with an error, which
   `systemctl --user list-units --failed` shows. The next run retries.
-- Pull requests in repositories without checks are never merged.
+- Pull requests whose head has no checks at all are never merged.
 - In a repository that requires up-to-date branches, a pull request behind its
   base waits until you comment `@dependabot rebase`; Dependabot rebases on its
   own only when the pull request conflicts.

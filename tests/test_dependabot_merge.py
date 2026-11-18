@@ -84,6 +84,7 @@ def pull(number=1, repo="Org/service", created="2026-11-01T00:00:00Z", **changes
             "mergeCommitAllowed": True, "rebaseMergeAllowed": True,
         },
         "latestOpinionatedReviews": {"nodes": []},
+        "timelineItems": {"nodes": []},
         "commits": {"totalCount": 1, "nodes": [commit()]},
     }
     for key, value in changes.items():
@@ -94,12 +95,27 @@ def pull(number=1, repo="Org/service", created="2026-11-01T00:00:00Z", **changes
     return pr
 
 
+def force_push(actor="dependabot", after=HEAD):
+    return {"nodes": [{"__typename": "HeadRefForcePushedEvent", "actor": {"login": actor}, "afterCommit": {"oid": after}}]}
+
+
 class FakeGitHub:
-    def __init__(self, *pages, fail_merge=(), fail_search=False):
+    def __init__(self, *pages, fail_merge=(), fail_search=False, fresh=None):
         self.pages = list(pages) or [[]]
         self.fail_merge = set(fail_merge)
         self.fail_search = fail_search
+        # Pull requests as they look when checked again before writing, by number.
+        self.fresh = fresh or {}
         self.calls = []
+
+    def pull(self, repository, number):
+        self.calls.append(("pull", repository, number))
+        if number in self.fresh:
+            return copy.deepcopy(self.fresh[number])
+        return copy.deepcopy(next(
+            pr for page in self.pages for pr in page
+            if pr["repository"]["nameWithOwner"] == repository and pr["number"] == number
+        ))
 
     def search(self, query, cursor):
         self.calls.append(("search", query, cursor))
@@ -132,7 +148,7 @@ def run(github, dry_run=False, owner="Org"):
 
 
 def writes(github):
-    return [call for call in github.calls if call[0] != "search"]
+    return [call for call in github.calls if call[0] not in ("search", "pull")]
 
 
 class VersionTests(unittest.TestCase):
@@ -197,12 +213,12 @@ class BlockerTests(unittest.TestCase):
             "draft": pull(isDraft=True),
             "read access to the repository": pull(viewerPermission="READ"),
             "no access to the repository": pull(viewerPermission=None),
-            "more than 10 commits": pull(commits={"totalCount": 11, "nodes": [commit()]}),
-            "commit bbbbbbb is not a GitHub-signed Dependabot commit": pull(
-                commits={"totalCount": 2, "nodes": [commit(oid="b" * 40, author="me@example.com"), commit()]}
-            ),
+            "2 commits; only a single Dependabot commit is trusted": pull(commits={"totalCount": 2, "nodes": [commit()]}),
             "commit aaaaaaa is not a GitHub-signed Dependabot commit": pull(commits={"totalCount": 1, "nodes": [commit(signed=False)]}),
-            "head commit not found": pull(headRefOid="c" * 40),
+            "commit bbbbbbb is not a GitHub-signed Dependabot commit": pull(
+                commits={"totalCount": 1, "nodes": [commit(oid="b" * 40)]}
+            ),
+            "branch was last rewritten by someone other than Dependabot": pull(timelineItems=force_push("teammate")),
             "changes requested": pull(reviewDecision="CHANGES_REQUESTED"),
             "checks failure": pull(commits={"totalCount": 1, "nodes": [commit(checks="FAILURE")]}),
             "checks pending": pull(commits={"totalCount": 1, "nodes": [commit(checks="PENDING")]}),
@@ -218,6 +234,23 @@ class BlockerTests(unittest.TestCase):
     def test_a_commit_from_someone_else_blocks_even_when_github_signed_it(self):
         pr = pull(commits={"totalCount": 1, "nodes": [commit(author="me@example.com")]})
         self.assertIn("not a GitHub-signed Dependabot commit", merge.blockers(pr, ME))
+        pr = pull(commits={"totalCount": 1, "nodes": [commit(committer="me@example.com")]})
+        self.assertIn("not a GitHub-signed Dependabot commit", merge.blockers(pr, ME))
+
+    def test_only_a_dependabot_rebase_may_have_rewritten_the_branch(self):
+        # A forged commit can carry Dependabot's author, GitHub's signature and a patch
+        # message, as a squash merge does, but putting it on the branch needs a rewrite.
+        self.assertIsNone(merge.blockers(pull(timelineItems=force_push()), ME))
+        rewritten = "branch was last rewritten by someone other than Dependabot"
+        for events in [
+            force_push("teammate"),
+            force_push(actor=None),
+            force_push(after="e" * 40),
+            {"nodes": [{"__typename": "HeadRefRestoredEvent"}]},
+            {"nodes": [{"__typename": "HeadRefDeletedEvent"}]},
+        ]:
+            with self.subTest(events=events):
+                self.assertEqual(merge.blockers(pull(timelineItems=events), ME), rewritten)
 
     def test_your_approval_at_the_head_that_is_not_enough_blocks(self):
         mine = {"state": "APPROVED", "author": {"login": ME.upper()}, "commit": {"oid": HEAD}}
@@ -287,6 +320,34 @@ class RunTests(unittest.TestCase):
         self.assertEqual((failed["pr"], failed["approved"]), ("https://github.com/Org/service/pull/1", True))
         self.assertEqual(records[-1]["merged"], 2)
 
+    def test_a_pull_request_that_changed_since_listing_is_skipped(self):
+        changed = pull(1, headRefOid="f" * 40, commits={"totalCount": 1, "nodes": [commit(oid="f" * 40, checks="PENDING")]})
+        github = FakeGitHub([pull(1), pull(2, repo="Org/infra")], fresh={1: changed})
+        code, records = run(github)
+        self.assertEqual(code, 0)
+        self.assertIn(("pull", "Org/service", 1), github.calls)
+        self.assertEqual(writes(github), [("approve", "Org/infra", 2, HEAD), ("merge", "Org/infra", 2, HEAD, "squash")])
+        self.assertEqual(records[0], {
+            "action": "skipped", "pr": "https://github.com/Org/service/pull/1",
+            "reason": "changed since listing: checks pending",
+        })
+
+    def test_unexpected_data_fails_one_pull_request_and_the_run_continues(self):
+        broken = pull(1)
+        del broken["timelineItems"]
+        github = FakeGitHub([broken, pull(2, repo="Org/infra")])
+        code, records = run(github)
+        self.assertEqual(code, 1)
+        self.assertEqual(records[0]["action"], "failed")
+        self.assertTrue(records[0]["error"].startswith("KeyError"))
+        self.assertEqual(writes(github)[-1], ("merge", "Org/infra", 2, HEAD, "squash"))
+
+    def test_a_failed_approval_is_not_reported_as_approved(self):
+        github = FakeGitHub([pull(1)])
+        github.approve = unittest.mock.Mock(side_effect=merge.GitHubError("gh api failed: HTTP 422"))
+        code, records = run(github)
+        self.assertEqual((code, records[0]["action"], records[0]["approved"]), (1, "failed", False))
+
     def test_a_failed_search_fails_the_run_without_writes(self):
         github = FakeGitHub(fail_search=True)
         code, records = run(github)
@@ -316,6 +377,8 @@ class GitHubTests(unittest.TestCase):
         outcomes = [
             self.completed(returncode=1, stderr="HTTP 405: Pull Request is not mergeable"),
             self.completed(json.dumps({"errors": [{"message": "Something went wrong"}]})),
+            self.completed(json.dumps({"data": None})),
+            self.completed("<html>502 Bad Gateway</html>"),
             subprocess.TimeoutExpired(["gh"], 120),
         ]
         for outcome in outcomes:
@@ -331,8 +394,19 @@ class GitHubTests(unittest.TestCase):
             merge.GitHub().search("user:Org", None)
             merge.GitHub().search("user:Org", "Y3Vyc29y")
         first, second = (call.args[0] for call in runner.call_args_list)
-        self.assertNotIn("endCursor=Y3Vyc29y", first)
+        self.assertFalse(any(arg.startswith("endCursor=") for arg in first))
         self.assertEqual(second[-2:], ["-f", "endCursor=Y3Vyc29y"])
+
+    def test_pull_reads_one_pull_request_with_a_numeric_number(self):
+        reply = json.dumps({"data": {"repository": {"pullRequest": {"number": 7}}}})
+        with unittest.mock.patch.object(merge.subprocess, "run", return_value=self.completed(reply)) as runner:
+            self.assertEqual(merge.GitHub().pull("Org/service", 7), {"number": 7})
+        args = runner.call_args.args[0]
+        self.assertEqual(args[-6:], ["-f", "owner=Org", "-f", "name=service", "-F", "number=7"])
+        missing = json.dumps({"data": {"repository": {"pullRequest": None}}})
+        with unittest.mock.patch.object(merge.subprocess, "run", return_value=self.completed(missing)):
+            with self.assertRaises(merge.GitHubError):
+                merge.GitHub().pull("Org/service", 7)
 
 
 class MainTests(unittest.TestCase):
@@ -344,8 +418,8 @@ class MainTests(unittest.TestCase):
 
     def test_main_passes_owner_and_dry_run(self):
         with unittest.mock.patch.object(merge, "run", return_value=0) as runner:
-            self.assertEqual(merge.main(["--owner", "ArrakisFinance", "--dry-run"]), 0)
-        runner.assert_called_once_with("ArrakisFinance", True)
+            self.assertEqual(merge.main(["--owner", "ExampleOrg", "--dry-run"]), 0)
+        runner.assert_called_once_with("ExampleOrg", True)
 
 
 if __name__ == "__main__":

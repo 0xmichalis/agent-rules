@@ -7,7 +7,8 @@ and merges each one that `blockers` allows, oldest first and at most one per rep
 per run, so other updates that now conflict are rebased by Dependabot and checked again
 before they merge. When the repository still requires a review, it approves the exact head
 commit first. Version changes come from Dependabot's commit message, never the pull
-request text, and only commits that GitHub signed for Dependabot are trusted.
+request text. Only a pull request with a single GitHub-signed Dependabot commit, on a branch
+nobody else rewrote, is trusted.
 """
 
 import argparse
@@ -23,36 +24,48 @@ GITHUB_EMAIL = "noreply@github.com"
 WRITE_PERMISSIONS = ("WRITE", "MAINTAIN", "ADMIN")
 # In order of preference, among the methods the repository allows.
 MERGE_METHODS = (("squashMergeAllowed", "squash"), ("mergeCommitAllowed", "merge"), ("rebaseMergeAllowed", "rebase"))
-MAX_COMMITS = 10
 # Pages of 25 or more pull requests with their commits have failed with HTTP 502.
 PAGE_SIZE = 10
 GH_TIMEOUT_SECONDS = 120
 APPROVAL_BODY = (
     "Approved by the dependabot-merge automation: every update is a patch or minor release,"
-    " the commits are Dependabot's and all checks passed."
+    " the only commit is Dependabot's and all checks passed."
 )
 
-QUERY = """
+# The last branch event shows whether anyone but Dependabot replaced the commit, which
+# needs a force push or a deleted and restored branch.
+PULL_FIELDS = """
+fragment pull on PullRequest {
+  number url isDraft createdAt headRefOid mergeable mergeStateStatus reviewDecision
+  author { login }
+  repository { nameWithOwner viewerPermission squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed }
+  latestOpinionatedReviews(first: 20) { nodes { state author { login } commit { oid } } }
+  timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT, HEAD_REF_DELETED_EVENT, HEAD_REF_RESTORED_EVENT], last: 1) {
+    nodes { __typename ... on HeadRefForcePushedEvent { actor { login } afterCommit { oid } } }
+  }
+  commits(last: 1) { totalCount nodes { commit {
+    oid message
+    author { email }
+    committer { email }
+    signature { isValid wasSignedByGitHub }
+    statusCheckRollup { state }
+  } } }
+}
+"""
+SEARCH_QUERY = PULL_FIELDS + """
 query($q: String!, $endCursor: String) {
   viewer { login }
   search(query: $q, type: ISSUE, first: %d, after: $endCursor) {
     pageInfo { hasNextPage endCursor }
-    nodes { ... on PullRequest {
-      number url isDraft createdAt headRefOid mergeable mergeStateStatus reviewDecision
-      author { login }
-      repository { nameWithOwner viewerPermission squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed }
-      latestOpinionatedReviews(first: 20) { nodes { state author { login } commit { oid } } }
-      commits(first: %d) { totalCount nodes { commit {
-        oid message
-        author { email }
-        committer { email }
-        signature { isValid wasSignedByGitHub }
-        statusCheckRollup { state }
-      } } }
-    } }
+    nodes { ...pull }
   }
 }
-""" % (PAGE_SIZE, MAX_COMMITS)
+""" % PAGE_SIZE
+PULL_QUERY = PULL_FIELDS + """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { ...pull } }
+}
+"""
 
 FRONT_MATTER = re.compile(r"^---\nupdated-dependencies:\n(.*?)^\.\.\.$", re.M | re.S)
 # Dependabot writes a version change as a subject such as "build(deps): bump x from 1.0 to 1.1
@@ -118,8 +131,30 @@ def update_blocker(message):
     return None
 
 
-def head_commit(pr):
-    return next((node["commit"] for node in pr["commits"]["nodes"] if node["commit"]["oid"] == pr["headRefOid"]), None)
+def branch_blocker(pr):
+    """Trust the branch only if Dependabot alone wrote its single commit."""
+    commits = pr["commits"]
+    if commits["totalCount"] != 1:
+        return f"{commits['totalCount']} commits; only a single Dependabot commit is trusted"
+    commit = commits["nodes"][0]["commit"]
+    signature = commit.get("signature") or {}
+    if (
+        commit["oid"] != pr["headRefOid"]
+        or (commit.get("author") or {}).get("email") != DEPENDABOT_EMAIL
+        or (commit.get("committer") or {}).get("email") != GITHUB_EMAIL
+        or not (signature.get("isValid") and signature.get("wasSignedByGitHub"))
+    ):
+        return f"commit {commit['oid'][:7]} is not a GitHub-signed Dependabot commit"
+    events = pr["timelineItems"]["nodes"]
+    if events:
+        event = events[-1]
+        if (
+            event.get("__typename") != "HeadRefForcePushedEvent"
+            or (event.get("actor") or {}).get("login") != DEPENDABOT_LOGIN
+            or (event.get("afterCommit") or {}).get("oid") != pr["headRefOid"]
+        ):
+            return "branch was last rewritten by someone other than Dependabot"
+    return None
 
 
 def approved_by(pr, login):
@@ -140,21 +175,10 @@ def blockers(pr, viewer):
         return "draft"
     if repository["viewerPermission"] not in WRITE_PERMISSIONS:
         return f"{(repository['viewerPermission'] or 'no').lower()} access to the repository"
-    commits = pr["commits"]
-    if commits["totalCount"] > len(commits["nodes"]):
-        return f"more than {MAX_COMMITS} commits"
-    for node in commits["nodes"]:
-        commit = node["commit"]
-        signature = commit.get("signature") or {}
-        if (
-            (commit.get("author") or {}).get("email") != DEPENDABOT_EMAIL
-            or (commit.get("committer") or {}).get("email") != GITHUB_EMAIL
-            or not (signature.get("isValid") and signature.get("wasSignedByGitHub"))
-        ):
-            return f"commit {commit['oid'][:7]} is not a GitHub-signed Dependabot commit"
-    head = head_commit(pr)
-    if head is None:
-        return "head commit not found"
+    reason = branch_blocker(pr)
+    if reason:
+        return reason
+    head = pr["commits"]["nodes"][0]["commit"]
     reason = update_blocker(head["message"])
     if reason:
         return reason
@@ -190,16 +214,30 @@ class GitHub:
             raise GitHubError(f"gh {args[1]} timed out after {GH_TIMEOUT_SECONDS} seconds") from error
         if result.returncode != 0:
             raise GitHubError(f"gh {args[1]} failed: {result.stderr.strip()[-500:]}")
-        return json.loads(result.stdout) if result.stdout.strip() else None
+        try:
+            return json.loads(result.stdout) if result.stdout.strip() else None
+        except ValueError as error:
+            raise GitHubError(f"gh {args[1]} returned invalid JSON") from error
+
+    def graphql(self, query, fields):
+        args = ["api", "graphql", "-f", f"query={query}"]
+        for name, value in fields.items():
+            args += ["-F" if isinstance(value, int) else "-f", f"{name}={value}"]
+        data = self.gh(args)
+        if not isinstance(data, dict) or data.get("errors") or not data.get("data"):
+            errors = data.get("errors") if isinstance(data, dict) else data
+            raise GitHubError(f"gh graphql failed: {json.dumps(errors)[:500]}")
+        return data["data"]
 
     def search(self, query, cursor):
-        args = ["api", "graphql", "-f", f"query={QUERY}", "-f", f"q={query}"]
-        if cursor:
-            args += ["-f", f"endCursor={cursor}"]
-        data = self.gh(args)
-        if data.get("errors"):
-            raise GitHubError(f"gh graphql failed: {json.dumps(data['errors'])[:500]}")
-        return data["data"]
+        return self.graphql(SEARCH_QUERY, {"q": query, **({"endCursor": cursor} if cursor else {})})
+
+    def pull(self, repository, number):
+        owner, name = repository.split("/")
+        pr = self.graphql(PULL_QUERY, {"owner": owner, "name": name, "number": number})["repository"]["pullRequest"]
+        if not pr:
+            raise GitHubError(f"{repository}#{number} not found")
+        return pr
 
     def approve(self, repository, number, sha):
         self.gh([
@@ -239,31 +277,39 @@ def run(owner, dry_run, github=None):
         log(owner=owner, action="failed", error=f"listing pull requests: {error}")
         return 1
     merged_repositories, failures, merged = set(), 0, 0
-    for pr in pulls:
-        repository = pr["repository"]["nameWithOwner"]
-        reason = blockers(pr, viewer)
-        if not reason and repository in merged_repositories:
-            reason = "another update merged in this repository during this run"
-        if reason:
-            log(pr=pr["url"], action="skipped", reason=reason)
-            continue
-        approve = pr["reviewDecision"] == "REVIEW_REQUIRED"
-        method = merge_method(pr["repository"])
-        if dry_run:
-            log(pr=pr["url"], action="would_merge", approve=approve, method=method, head=pr["headRefOid"])
-            merged_repositories.add(repository)
-            continue
+    for listed in pulls:
+        approved = False
         try:
+            repository = listed["repository"]["nameWithOwner"]
+            reason = blockers(listed, viewer)
+            if not reason and repository in merged_repositories:
+                reason = "another update merged in this repository during this run"
+            if reason:
+                log(pr=listed["url"], action="skipped", reason=reason)
+                continue
+            # The listing can be minutes old, so check the pull request again right before writing.
+            pr = github.pull(repository, listed["number"])
+            reason = blockers(pr, viewer)
+            if reason:
+                log(pr=pr["url"], action="skipped", reason=f"changed since listing: {reason}")
+                continue
+            approve = pr["reviewDecision"] == "REVIEW_REQUIRED"
+            method = merge_method(pr["repository"])
+            if dry_run:
+                log(pr=pr["url"], action="would_merge", approve=approve, method=method, head=pr["headRefOid"])
+                merged_repositories.add(repository)
+                continue
             if approve:
                 github.approve(repository, pr["number"], pr["headRefOid"])
+                approved = True
             github.merge(repository, pr["number"], pr["headRefOid"], method)
-        except GitHubError as error:
+        except (GitHubError, KeyError, TypeError, AttributeError, IndexError, ValueError) as error:
             failures += 1
-            log(pr=pr["url"], action="failed", approved=approve, error=str(error))
+            log(pr=listed.get("url"), action="failed", approved=approved, error=f"{type(error).__name__}: {error}")
             continue
         merged += 1
         merged_repositories.add(repository)
-        log(pr=pr["url"], action="merged", approved=approve, method=method, head=pr["headRefOid"])
+        log(pr=pr["url"], action="merged", approved=approved, method=method, head=pr["headRefOid"])
     log(owner=owner, action="finished", dry_run=dry_run, open=len(pulls), merged=merged, failed=failures)
     return 1 if failures else 0
 
