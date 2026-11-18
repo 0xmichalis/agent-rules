@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""Approve and merge passing patch and minor Dependabot pull requests for one GitHub owner.
+
+A systemd user timer runs this every 30 minutes per owner, as the account `gh` is signed
+in to. It lists the open Dependabot pull requests in the owner's unarchived repositories
+and merges each one that `blockers` allows, oldest first and at most one per repository
+per run, so other updates that now conflict are rebased by Dependabot and checked again
+before they merge. When the repository still requires a review, it approves the exact head
+commit first. Version changes come from Dependabot's commit message, never the pull
+request text, and only commits that GitHub signed for Dependabot are trusted.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+
+DEPENDABOT_LOGIN = "dependabot"
+DEPENDABOT_EMAIL = "49699333+dependabot[bot]@users.noreply.github.com"
+GITHUB_EMAIL = "noreply@github.com"
+WRITE_PERMISSIONS = ("WRITE", "MAINTAIN", "ADMIN")
+# In order of preference, among the methods the repository allows.
+MERGE_METHODS = (("squashMergeAllowed", "squash"), ("mergeCommitAllowed", "merge"), ("rebaseMergeAllowed", "rebase"))
+MAX_COMMITS = 10
+# Pages of 25 or more pull requests with their commits have failed with HTTP 502.
+PAGE_SIZE = 10
+GH_TIMEOUT_SECONDS = 120
+APPROVAL_BODY = (
+    "Approved by the dependabot-merge automation: every update is a patch or minor release,"
+    " the commits are Dependabot's and all checks passed."
+)
+
+QUERY = """
+query($q: String!, $endCursor: String) {
+  viewer { login }
+  search(query: $q, type: ISSUE, first: %d, after: $endCursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on PullRequest {
+      number url isDraft createdAt headRefOid mergeable mergeStateStatus reviewDecision
+      author { login }
+      repository { nameWithOwner viewerPermission squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed }
+      latestOpinionatedReviews(first: 20) { nodes { state author { login } commit { oid } } }
+      commits(first: %d) { totalCount nodes { commit {
+        oid message
+        author { email }
+        committer { email }
+        signature { isValid wasSignedByGitHub }
+        statusCheckRollup { state }
+      } } }
+    } }
+  }
+}
+""" % (PAGE_SIZE, MAX_COMMITS)
+
+FRONT_MATTER = re.compile(r"^---\nupdated-dependencies:\n(.*?)^\.\.\.$", re.M | re.S)
+# Dependabot writes a version change as a subject such as "build(deps): bump x from 1.0 to 1.1
+# in /dir", a body line "Bumps [x](url) from 1.0 to 1.1." or a group body line "Updates `x`
+# from 1.0 to 1.1".
+CHANGE = re.compile(
+    r"^(?:Bumps \[(?P<linked>[^\]]+)\]\([^)\s]*\)|Bumps (?P<plain>\S+)|Updates `(?P<quoted>[^`]+)`"
+    r"|(?:[a-z]+(?:\([a-z-]+\))?: )?[Bb]ump (?P<subject>\S+))"
+    r" from (?P<old>\S+) to (?P<new>\S+?)\.?(?: in \S+)?$",
+    re.M,
+)
+VERSION = re.compile(r"v?(\d+(?:\.\d+)*)")
+
+
+class GitHubError(RuntimeError):
+    """A gh call failed; the next run tries again."""
+
+
+def breaking_change(old, new):
+    """Return why a version change is not a patch or minor upgrade, or None."""
+    old_match, new_match = VERSION.fullmatch(old), VERSION.fullmatch(new)
+    if not old_match or not new_match:
+        return f"unrecognised versions {old} -> {new}"
+    before = [int(part) for part in old_match.group(1).split(".")]
+    after = [int(part) for part in new_match.group(1).split(".")]
+    width = max(len(before), len(after))
+    before += [0] * (width - len(before))
+    after += [0] * (width - len(after))
+    if after <= before:
+        return f"not an upgrade {old} -> {new}"
+    changed = next(index for index in range(width) if before[index] != after[index])
+    # Semver treats the first non-zero component as the major one, so 0.8 -> 0.9 breaks.
+    major = next((index for index, part in enumerate(before) if part), width - 1)
+    if changed <= major:
+        return f"major update {old} -> {new}"
+    return None
+
+
+def update_blocker(message):
+    """Check every update that Dependabot's commit message records."""
+    front_matter = FRONT_MATTER.search(message)
+    if not front_matter:
+        return "commit message has no Dependabot metadata"
+    dependencies = []
+    for item in re.split(r"^- ", front_matter.group(1), flags=re.M)[1:]:
+        fields = dict(re.findall(r"^\s*([a-z-]+): *(.*?)\s*$", item, flags=re.M))
+        dependencies.append((fields.get("dependency-name", "").strip("\"'"), fields.get("update-type", "")))
+    if not dependencies:
+        return "commit message lists no updated dependencies"
+    changes = {}
+    for change in CHANGE.finditer(message[: front_matter.start()]):
+        name = next(change.group(group) for group in ("linked", "plain", "quoted", "subject") if change.group(group))
+        changes.setdefault(name, []).append((change.group("old"), change.group("new")))
+    for name, update_type in dependencies:
+        if update_type == "version-update:semver-major":
+            return f"{name}: major update"
+        if name not in changes:
+            return f"{name}: version change not found in the commit message"
+        for old, new in changes[name]:
+            reason = breaking_change(old, new)
+            if reason:
+                return f"{name}: {reason}"
+    return None
+
+
+def head_commit(pr):
+    return next((node["commit"] for node in pr["commits"]["nodes"] if node["commit"]["oid"] == pr["headRefOid"]), None)
+
+
+def approved_by(pr, login):
+    return any(
+        (review.get("author") or {}).get("login", "").lower() == login.lower()
+        and review.get("state") == "APPROVED"
+        and (review.get("commit") or {}).get("oid") == pr["headRefOid"]
+        for review in pr["latestOpinionatedReviews"]["nodes"]
+    )
+
+
+def blockers(pr, viewer):
+    """Return the first reason not to merge this pull request, or None."""
+    repository = pr["repository"]
+    if (pr.get("author") or {}).get("login") != DEPENDABOT_LOGIN:
+        return "not opened by Dependabot"
+    if pr["isDraft"]:
+        return "draft"
+    if repository["viewerPermission"] not in WRITE_PERMISSIONS:
+        return f"{(repository['viewerPermission'] or 'no').lower()} access to the repository"
+    commits = pr["commits"]
+    if commits["totalCount"] > len(commits["nodes"]):
+        return f"more than {MAX_COMMITS} commits"
+    for node in commits["nodes"]:
+        commit = node["commit"]
+        signature = commit.get("signature") or {}
+        if (
+            (commit.get("author") or {}).get("email") != DEPENDABOT_EMAIL
+            or (commit.get("committer") or {}).get("email") != GITHUB_EMAIL
+            or not (signature.get("isValid") and signature.get("wasSignedByGitHub"))
+        ):
+            return f"commit {commit['oid'][:7]} is not a GitHub-signed Dependabot commit"
+    head = head_commit(pr)
+    if head is None:
+        return "head commit not found"
+    reason = update_blocker(head["message"])
+    if reason:
+        return reason
+    if pr["reviewDecision"] == "CHANGES_REQUESTED":
+        return "changes requested"
+    if pr["reviewDecision"] == "REVIEW_REQUIRED" and approved_by(pr, viewer):
+        return "needs another approval besides yours"
+    checks = (head.get("statusCheckRollup") or {}).get("state")
+    if checks != "SUCCESS":
+        return f"checks {checks.lower()}" if checks else "no checks"
+    if pr["mergeable"] != "MERGEABLE":
+        return f"mergeable state {pr['mergeable'].lower()}"
+    if pr["mergeStateStatus"] == "BEHIND":
+        return "behind its base branch, which must be up to date"
+    if not merge_method(repository):
+        return "no merge method allowed"
+    return None
+
+
+def merge_method(repository):
+    return next((method for flag, method in MERGE_METHODS if repository.get(flag)), None)
+
+
+class GitHub:
+    """Every call to GitHub goes through gh, signed in as the account that approves and merges."""
+
+    def gh(self, args):
+        try:
+            result = subprocess.run(
+                ["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_SECONDS, check=False
+            )
+        except subprocess.TimeoutExpired as error:
+            raise GitHubError(f"gh {args[1]} timed out after {GH_TIMEOUT_SECONDS} seconds") from error
+        if result.returncode != 0:
+            raise GitHubError(f"gh {args[1]} failed: {result.stderr.strip()[-500:]}")
+        return json.loads(result.stdout) if result.stdout.strip() else None
+
+    def search(self, query, cursor):
+        args = ["api", "graphql", "-f", f"query={QUERY}", "-f", f"q={query}"]
+        if cursor:
+            args += ["-f", f"endCursor={cursor}"]
+        data = self.gh(args)
+        if data.get("errors"):
+            raise GitHubError(f"gh graphql failed: {json.dumps(data['errors'])[:500]}")
+        return data["data"]
+
+    def approve(self, repository, number, sha):
+        self.gh([
+            "api", f"repos/{repository}/pulls/{number}/reviews", "-X", "POST",
+            "-f", "event=APPROVE", "-f", f"commit_id={sha}", "-f", f"body={APPROVAL_BODY}",
+        ])
+
+    def merge(self, repository, number, sha, method):
+        self.gh([
+            "api", f"repos/{repository}/pulls/{number}/merge", "-X", "PUT",
+            "-f", f"sha={sha}", "-f", f"merge_method={method}",
+        ])
+
+
+def log(**fields):
+    print(json.dumps(fields, sort_keys=True), flush=True)
+
+
+def open_pull_requests(github, owner):
+    query = f"user:{owner} is:pr is:open author:app/dependabot archived:false"
+    pulls, cursor, viewer = [], None, None
+    while True:
+        data = github.search(query, cursor)
+        viewer = data["viewer"]["login"]
+        pulls += [node for node in data["search"]["nodes"] if node]
+        page = data["search"]["pageInfo"]
+        if not page["hasNextPage"]:
+            return viewer, sorted(pulls, key=lambda pr: pr["createdAt"])
+        cursor = page["endCursor"]
+
+
+def run(owner, dry_run, github=None):
+    github = github or GitHub()
+    try:
+        viewer, pulls = open_pull_requests(github, owner)
+    except (GitHubError, KeyError, TypeError, ValueError) as error:
+        log(owner=owner, action="failed", error=f"listing pull requests: {error}")
+        return 1
+    merged_repositories, failures, merged = set(), 0, 0
+    for pr in pulls:
+        repository = pr["repository"]["nameWithOwner"]
+        reason = blockers(pr, viewer)
+        if not reason and repository in merged_repositories:
+            reason = "another update merged in this repository during this run"
+        if reason:
+            log(pr=pr["url"], action="skipped", reason=reason)
+            continue
+        approve = pr["reviewDecision"] == "REVIEW_REQUIRED"
+        method = merge_method(pr["repository"])
+        if dry_run:
+            log(pr=pr["url"], action="would_merge", approve=approve, method=method, head=pr["headRefOid"])
+            merged_repositories.add(repository)
+            continue
+        try:
+            if approve:
+                github.approve(repository, pr["number"], pr["headRefOid"])
+            github.merge(repository, pr["number"], pr["headRefOid"], method)
+        except GitHubError as error:
+            failures += 1
+            log(pr=pr["url"], action="failed", approved=approve, error=str(error))
+            continue
+        merged += 1
+        merged_repositories.add(repository)
+        log(pr=pr["url"], action="merged", approved=approve, method=method, head=pr["headRefOid"])
+    log(owner=owner, action="finished", dry_run=dry_run, open=len(pulls), merged=merged, failed=failures)
+    return 1 if failures else 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--owner", required=True, help="GitHub organization or user whose repositories to check")
+    parser.add_argument("--dry-run", action="store_true", help="print what would merge without approving or merging")
+    args = parser.parse_args(argv)
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", args.owner):
+        parser.error(f"--owner must be a GitHub organization or user name, not {args.owner!r}")
+    return run(args.owner, args.dry_run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,9 @@
+[Unit]
+Description=Merge Dependabot pull requests for %i every 30 minutes
+
+[Timer]
+OnCalendar=*:07/30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

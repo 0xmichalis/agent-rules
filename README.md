@@ -87,9 +87,14 @@ After install, resolve those links under `~/.agents/agent-rules/`.
 
 ## Automations
 
-[automations/pr-review-poll](automations/pr-review-poll/README.md) starts a
-Claude Code review session when someone asks for your review in Slack. The
-installer copies it with the rules; enabling it is a separate, opt-in step.
+- [automations/pr-review-poll](automations/pr-review-poll/README.md) starts a
+  Claude Code review session when someone asks for your review in Slack.
+- [automations/dependabot-merge](automations/dependabot-merge/README.md)
+  approves and merges passing patch and minor Dependabot pull requests for a
+  GitHub organization or user.
+
+The installer copies automations with the rules; enabling each one is a
+separate, opt-in step.
 
 ## Private context
 
