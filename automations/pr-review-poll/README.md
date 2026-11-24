@@ -22,10 +22,12 @@ starts a run while the previous one is still going. Each run has three steps.
    pull request as structured output. It has no tool that runs commands, and it
    ignores your settings files. A run that did not make exactly the search it
    was given, or returned no structured output, counts as failed and leaves
-   that starting point alone. When Claude reports a rate limit, the script
-   checks Codex's included usage, searches Slack through the connected Codex
-   account, and uses GPT-6.1 Terra to extract the requests. The fallback model
-   receives search results as data with command tools and connectors disabled.
+   that starting point alone. If the `claude` executable is missing or Claude
+   reports a rate limit, the script looks for `codex` on its `PATH`. If Codex
+   has included usage available, the script searches Slack through the connected
+   Codex account and uses GPT-6.1 Terra to extract the requests. The fallback
+   model receives search results as data with command tools and connectors
+   disabled.
 3. Submit. The dispatcher validates the permalink, author and pull request URLs
    and ignores messages it has handled. It skips pull requests that are merged
    or closed, yours, opened from a fork or approved by you at the current head.
@@ -36,11 +38,12 @@ starts a run while the previous one is still going. Each run has three steps.
    launch stays queued for retry.
 
 `REVIEW_AGENT`, `REVIEW_MODEL` and `REVIEW_EFFORT` choose the agent, which
-default to `claude`, `claude-opus-5-5` and `xhigh`. While Claude is rate-limited,
-new and queued Claude reviews start in Codex with GPT-6.2 Sol at `xhigh`. The
-next successful Claude poll restores the configured reviewer. If both are
-rate-limited, the poll keeps its cursor and retries queued reviews on a later
-run. Review tabs use the terminal surface so the dispatcher can track them.
+default to `claude`, `claude-opus-5-5` and `xhigh`. During fallback, new and
+queued Claude reviews start in Codex with GPT-6.2 Sol at `xhigh`. The next
+successful Claude poll restores the configured reviewer. If fallback fails,
+the script keeps its cursor and retries queued Claude and Codex
+reviews on a later run. Review tabs use the terminal surface so the dispatcher
+can track them.
 
 Review sessions never approve. When a pull request is ready, the agent sends a
 push notification if it can and waits; open its tab in Orca and ask it to
@@ -50,10 +53,11 @@ approve.
 
 - Linux with a systemd user manager.
 - Orca running, with `REVIEW_CWD` inside one of its workspaces.
-- Claude Code signed in to claude.ai with the Slack connector connected.
-- For fallback, Codex CLI signed in to a ChatGPT account with the Slack
-  connector connected to the same workspace and access to GPT-6.1 Terra and
-  GPT-6.2 Sol.
+- For the primary poll, `claude` on the service's `PATH` and Claude Code signed
+  in to claude.ai with the Slack connector connected.
+- For fallback, `codex` on the service's `PATH` and Codex CLI signed in to a
+  ChatGPT account with Slack connected to the same workspace and access to
+  GPT-6.1 Terra and GPT-6.2 Sol.
 - `gh` signed in with access to the organization.
 
 ## Set up

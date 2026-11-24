@@ -119,6 +119,10 @@ class PollError(RuntimeError):
     """A poll failure whose message can be logged without provider output."""
 
 
+class ClaudeUnavailable(PollError):
+    """A missing Claude executable or a quota rejection permits fallback."""
+
+
 # Failures that one run can log and retry later.
 RECOVERABLE = (RuntimeError, OSError, subprocess.SubprocessError, KeyError, ValueError)
 
@@ -264,6 +268,9 @@ def parse_permalink(value, domain):
 class Host:
     """Every call to gh, Claude, Codex, Orca and gdbus goes through this class."""
 
+    def has_cli(self, name):
+        return shutil.which(name) is not None
+
     def run(self, command, cwd=None, input_text=None, timeout=120, env=None):
         return subprocess.run(
             command, cwd=cwd, input=input_text, capture_output=True, text=True,
@@ -405,7 +412,7 @@ class Host:
         with self.codex_rpc(cwd) as rpc:
             available = rpc("account/rateLimits/read").get("ordinaryUsageAllowed")
             if available is False:
-                raise PollError("Claude and Codex are rate-limited")
+                raise PollError("Codex is rate-limited")
             if available is not True:
                 raise PollError("Codex included usage could not be verified")
             thread = rpc("thread/start", {"ephemeral": True, "approvalPolicy": "never", "sandbox": "read-only"})
@@ -444,7 +451,7 @@ class Host:
             if event.get("type") == "turn.failed":
                 message = (event.get("error") or {}).get("message", "")
                 if re.search(r"usage limit|rate.limit|\b429\b", message, re.I):
-                    raise PollError("Claude and Codex are rate-limited")
+                    raise PollError("Codex is rate-limited")
             if event.get("type") == "turn.completed":
                 completed = True
             if event.get("type") == "item.completed":
@@ -875,6 +882,22 @@ class Dispatcher:
         return 0
 
     def poll_requests(self, filter_prompt, arguments, user):
+        try:
+            return self.poll_with_claude(filter_prompt, arguments)
+        except ClaudeUnavailable as claude_error:
+            if self.configured_reviewer[0] in ("claude", "codex"):
+                self.reviewer = None
+            self.log("poll_fallback", agent="codex", reason=str(claude_error))
+            try:
+                requests = self.poll_with_codex(filter_prompt, arguments, user)
+            except PollError as codex_error:
+                raise PollError(f"{claude_error}. {codex_error}") from None
+        self.reviewer = CODEX_REVIEW if self.configured_reviewer[0] == "claude" else self.configured_reviewer
+        return requests
+
+    def poll_with_claude(self, filter_prompt, arguments):
+        if not self.host.has_cli("claude"):
+            raise ClaudeUnavailable("claude executable not found on PATH")
         search_prompt = CLAUDE_SEARCH_PROMPT.format(tool=SLACK_SEARCH_TOOL, arguments=json.dumps(arguments))
         prompt = f"{POLL_INSTRUCTIONS}\n{search_prompt}\n{filter_prompt}"
         env = dict(os.environ)
@@ -885,6 +908,8 @@ class Dispatcher:
             result = self.host.poll(prompt, [SLACK_SEARCH_TOOL], cwd=str(self.state_dir), env=env)
         except subprocess.TimeoutExpired:
             raise PollError(f"claude did not finish within {POLL_TIMEOUT_SECONDS} seconds") from None
+        except FileNotFoundError:
+            raise ClaudeUnavailable("claude executable could not be found at startup") from None
         except OSError:
             raise PollError("claude could not start") from None
         summary = summarize_poll(result.stdout)
@@ -896,32 +921,34 @@ class Dispatcher:
             searched=searched, cost_usd=summary["cost_usd"], rate_limited=limited,
         )
         if limited:
-            if self.configured_reviewer[0] in ("claude", "codex"):
-                self.reviewer = None
-            output = self.poll_with_codex(filter_prompt, arguments, user)
-        else:
-            if failed:
-                raise PollError(f"claude poll failed (exit code {result.returncode})")
-            if not searched:
-                raise PollError("the Slack search did not run with the given arguments")
-            output = summary["output"]
-        requests = output.get("requests") if isinstance(output, dict) else None
-        if not isinstance(requests, list):
-            raise PollError("the poll returned no list of requests")
-        if limited:
-            self.reviewer = CODEX_REVIEW if self.configured_reviewer[0] == "claude" else self.configured_reviewer
-        return requests
+            raise ClaudeUnavailable("Claude is rate-limited")
+        if failed:
+            raise PollError(f"claude poll failed (exit code {result.returncode})")
+        if not searched:
+            raise PollError("the Slack search did not run with the given arguments")
+        return self.get_requests(summary["output"])
 
     def poll_with_codex(self, filter_prompt, arguments, user):
+        if not self.host.has_cli("codex"):
+            raise PollError("codex executable not found on PATH")
         try:
             output = self.host.poll_codex(filter_prompt, arguments, user, cwd=str(self.state_dir))
         except subprocess.TimeoutExpired:
             raise PollError("Codex fallback poll timed out") from None
+        except FileNotFoundError:
+            raise PollError("codex executable could not be found at startup") from None
         except (OSError, KeyError, ValueError, TypeError):
             raise PollError("Codex fallback poll could not read account or Slack data") from None
-        if isinstance(output, dict) and isinstance(output.get("requests"), list):
-            self.log("polled", agent="codex", model=CODEX_POLL_MODEL, after=int(arguments["after"]), searched=True)
-        return output
+        requests = self.get_requests(output)
+        self.log("polled", agent="codex", model=CODEX_POLL_MODEL, after=int(arguments["after"]), searched=True)
+        return requests
+
+    @staticmethod
+    def get_requests(output):
+        requests = output.get("requests") if isinstance(output, dict) else None
+        if not isinstance(requests, list):
+            raise PollError("the poll returned no list of requests")
+        return requests
 
     def poll_failed(self, reason):
         """Keep the cursor so the next run covers the gap, and alert when it grows."""

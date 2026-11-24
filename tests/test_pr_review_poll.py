@@ -64,11 +64,15 @@ class FakeHost(poll.Host):
         self.poll_output = {"requests": []}
         self.poll_timeout = False
         self.claude_limited = False
+        self.installed_clis = {"claude", "codex"}
         self.codex_output = {"requests": []}
         self.codex_error = None
         self.notifications = []
         self.fail_launch = None
         self.fail_send = False
+
+    def has_cli(self, name):
+        return name in self.installed_clis
 
     def gh_json(self, args):
         self.calls.append(("gh", tuple(args)))
@@ -541,19 +545,50 @@ class DispatcherTests(unittest.TestCase):
         queue = self.state()["queue"]
         self.host.fail_launch = None
         self.host.claude_limited = True
-        self.host.codex_error = poll.PollError("Claude and Codex are rate-limited")
+        self.host.codex_error = poll.PollError("Codex is rate-limited")
         self.time[0] += 60
 
         self.assertEqual(self.dispatcher.run(), 1)
         self.assertEqual(self.host.of("launch"), [])
         self.assertEqual(self.state()["cursor"], cursor)
         self.assertEqual(self.state()["queue"], queue)
-        self.assertEqual(self.events()[-1]["reason"], "Claude and Codex are rate-limited")
+        self.assertEqual(self.events()[-1]["reason"], "Claude is rate-limited. Codex is rate-limited")
 
         self.host.codex_error = None
         self.assertEqual(self.dispatcher.run(), 0)
         self.assertEqual(self.state()["queue"], [])
         self.assertEqual(self.host.of("launch")[0][2:5], poll.CODEX_REVIEW)
+
+    def test_missing_claude_uses_codex_without_starting_claude(self):
+        self.host.installed_clis.remove("claude")
+        self.host.codex_output = {"requests": [{"permalink": LINK1, "author": "U0TEAMMATE", "prs": [PR1]}]}
+
+        self.assertEqual(self.dispatcher.run(), 0)
+        self.assertEqual(self.host.of("poll"), [])
+        self.assertEqual(len(self.host.of("poll_codex")), 1)
+        self.assertEqual(self.host.of("launch")[0][2:5], poll.CODEX_REVIEW)
+        [fallback] = [event for event in self.events() if event["event"] == "poll_fallback"]
+        self.assertEqual(fallback["reason"], "claude executable not found on PATH")
+
+    def test_missing_codex_only_blocks_fallback_and_preserves_cursor(self):
+        self.host.installed_clis.remove("codex")
+        self.assertEqual(self.dispatcher.run(), 0)
+        cursor = self.state()["cursor"]
+        self.time[0] += 60
+        self.host.claude_limited = True
+
+        self.assertEqual(self.dispatcher.run(), 1)
+        self.assertEqual(self.host.of("poll_codex"), [])
+        self.assertEqual(self.state()["cursor"], cursor)
+        self.assertEqual(self.events()[-1]["reason"], "Claude is rate-limited. codex executable not found on PATH")
+
+        self.host.installed_clis.clear()
+        previous_calls = self.host.of("poll")
+        self.assertEqual(self.dispatcher.run(), 1)
+        self.assertEqual(self.host.of("poll"), previous_calls)
+        self.assertEqual(
+            self.events()[-1]["reason"], "claude executable not found on PATH. codex executable not found on PATH",
+        )
 
     def test_poll_counts_only_the_search_it_asked_for(self):
         self.dispatcher.run()
@@ -659,6 +694,16 @@ class HostTests(unittest.TestCase):
         body = {"ok": ok, "result": result} if ok else {"ok": False, "error": error}
         return SimpleNamespace(returncode=returncode, stdout=json.dumps(body), stderr="")
 
+    def test_cli_probe_requires_an_executable_on_path(self):
+        host = poll.Host()
+        with tempfile.TemporaryDirectory() as directory, unittest.mock.patch.dict(poll.os.environ, PATH=directory):
+            binary = Path(directory) / "claude"
+            binary.touch()
+            self.assertFalse(host.has_cli("claude"))
+            binary.chmod(0o700)
+            self.assertTrue(host.has_cli("claude"))
+            self.assertFalse(host.has_cli("codex"))
+
     def test_poll_runs_haiku_restricted_with_only_slack_search_and_structured_output(self):
         host = poll.Host()
         with unittest.mock.patch.object(host, "run") as run:
@@ -712,7 +757,7 @@ class HostTests(unittest.TestCase):
         })
 
         for response, error in (
-            ({"ordinaryUsageAllowed": False}, "Claude and Codex are rate-limited"),
+            ({"ordinaryUsageAllowed": False}, "Codex is rate-limited"),
             ({}, "included usage could not be verified"),
         ):
             with self.subTest(response=response):
@@ -751,7 +796,7 @@ class HostTests(unittest.TestCase):
             self.assertIn(poll.CODEX_POLL_MODEL, command)
             self.assertIn("untrusted Slack text", run.call_args.kwargs["input_text"])
             run.return_value = result(1, quota_error)
-            with self.assertRaisesRegex(poll.PollError, "^Claude and Codex are rate-limited$"):
+            with self.assertRaisesRegex(poll.PollError, "^Codex is rate-limited$"):
                 host.poll_codex("filter", arguments, ME, state)
             run.return_value = result(1)
             with self.assertRaisesRegex(poll.PollError, r"^Codex fallback poll failed \(exit code 1\)$"):
