@@ -1,5 +1,5 @@
 import importlib.util
-from contextlib import redirect_stderr
+from contextlib import nullcontext, redirect_stderr
 import io
 import json
 from pathlib import Path
@@ -63,6 +63,9 @@ class FakeHost(poll.Host):
         self.searches = lambda asked: [asked]
         self.poll_output = {"requests": []}
         self.poll_timeout = False
+        self.claude_limited = False
+        self.codex_output = {"requests": []}
+        self.codex_error = None
         self.notifications = []
         self.fail_launch = None
         self.fail_send = False
@@ -105,6 +108,13 @@ class FakeHost(poll.Host):
         self.calls.append(("poll", prompt, tuple(allowed_tools), cwd, env))
         if self.poll_timeout:
             raise poll.subprocess.TimeoutExpired(["claude"], poll.POLL_TIMEOUT_SECONDS)
+        if self.claude_limited:
+            events = [
+                {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "rateLimitType": "five_hour"}},
+                {"type": "assistant", "error": "rate_limit"},
+                {"type": "result", "subtype": "success", "is_error": True, "result": "You've hit your 5-hour limit"},
+            ]
+            return SimpleNamespace(returncode=1, stdout="\n".join(map(json.dumps, events)), stderr="")
         asked = json.loads(re.search(r"these arguments:\n   (.*)\n", prompt).group(1))
         searches = [
             {"type": "tool_use", "name": poll.SLACK_SEARCH_TOOL, "input": search} for search in self.searches(asked)
@@ -116,6 +126,12 @@ class FakeHost(poll.Host):
         ]
         stdout = "\n".join(json.dumps(event) for event in events) + "\nnot json\n[]\n"
         return SimpleNamespace(returncode=self.poll_returncode, stdout=stdout, stderr="boom")
+
+    def poll_codex(self, filter_prompt, arguments, user, cwd):
+        self.calls.append(("poll_codex", filter_prompt, arguments, user, cwd))
+        if self.codex_error:
+            raise self.codex_error
+        return self.codex_output
 
     def notify(self, title, body):
         self.notifications.append((title, body))
@@ -157,7 +173,8 @@ class DispatcherTests(unittest.TestCase):
     def housekeeping(self, advance=0):
         self.time[0] += advance
         self.dispatcher._agents = None
-        self.dispatcher.housekeeping()
+        self.dispatcher.tend_sessions()
+        self.dispatcher.drain_queue()
 
     def test_pull_request_urls_are_validated_and_canonical(self):
         parse = lambda url: poll.parse_pr_url(url, ORG)
@@ -293,7 +310,7 @@ class DispatcherTests(unittest.TestCase):
         self.host.prs[PR1] = None
         self.host.poll_output = {"requests": [
             {"permalink": LINK1, "author": "U0TEAMMATE", "prs": [PR1]},
-            {"permalink": "https://evil.example/x", "author": "U0X", "prs": [PR2]},
+            {"permalink": "https://evil.example/x?token=sentinel-secret", "author": "U0X", "prs": [PR2]},
             {"permalink": LINK2, "author": "U0X", "prs": PR2},
             {"permalink": LINK3, "author": 7, "prs": [PR2]},
             [LINK4, PR2],
@@ -309,6 +326,7 @@ class DispatcherTests(unittest.TestCase):
             [("error", "submit")] + [("rejected", None)] * 4,
         )
         self.assertIn("gh pr view failed: HTTP 502", self.events()[1]["error"])
+        self.assertNotIn("sentinel-secret", (self.state_dir / "events.log").read_text())
 
     def test_poll_returns_slack_values_as_data_and_cannot_run_commands(self):
         self.host.poll_output = {"requests": [
@@ -462,8 +480,8 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(cursor, self.time[0])
         polled = self.events()[-1]
         self.assertEqual(
-            {key: polled[key] for key in ("event", "searches", "result", "cost_usd")},
-            {"event": "polled", "searches": [json.loads(arguments)], "result": "done", "cost_usd": 0.01},
+            {key: polled[key] for key in ("event", "agent", "searched", "cost_usd", "rate_limited")},
+            {"event": "polled", "agent": "claude", "searched": True, "cost_usd": 0.01, "rate_limited": False},
         )
         self.time[0] += 60
         self.host.poll_returncode = 1
@@ -486,10 +504,56 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(self.state()["cursor"], first)
         [(title, body)] = self.host.notifications
         self.assertEqual(title, "PR review poll is failing")
-        self.assertIn("No successful Slack poll for 15 minutes: claude exited with 1: boom.", body)
+        self.assertIn("No successful Slack poll for 15 minutes: claude poll failed (exit code 1).", body)
+        self.assertEqual(self.host.of("poll_codex"), [])
         self.host.poll_returncode = 0
         self.assertEqual(self.dispatcher.run(), 0)
         self.assertEqual(self.state()["cursor"], self.time[0])
+
+    def test_claude_quota_routes_new_and_queued_reviews_to_codex_until_recovery(self):
+        self.host.fail_launch = "orca unavailable"
+        self.submit(LINK1, PR1)
+        self.host.fail_launch = None
+        self.host.claude_limited = True
+        self.host.codex_output = {"requests": [{"permalink": LINK2, "author": "U0TEAMMATE", "prs": [PR2]}]}
+
+        self.assertEqual(self.dispatcher.run(), 0)
+        self.assertEqual(self.state()["queue"], [])
+        self.assertEqual(self.state()["cursor"], self.time[0])
+        self.assertEqual([call[2:5] for call in self.host.of("launch")], [poll.CODEX_REVIEW] * 2)
+        self.assertIn(PR1, self.host.of("launch")[0][5])
+        self.assertIn(PR2, self.host.of("launch")[1][5])
+        [(_, _, arguments, user, _)] = self.host.of("poll_codex")
+        self.assertEqual(arguments, poll.search_arguments(ME, self.time[0] - poll.SEARCH_OVERLAP_SECONDS))
+        self.assertEqual(user, ME)
+
+        self.host.claude_limited = False
+        self.host.poll_output = {"requests": [{"permalink": LINK3, "author": "U0TEAMMATE", "prs": [PR3]}]}
+        self.assertEqual(self.dispatcher.run(), 0)
+        self.assertEqual(self.host.of("launch")[-1][2:5], tuple(poll.REVIEW_DEFAULTS.values()))
+        self.assertEqual(len(self.host.of("poll_codex")), 1)
+
+    def test_unavailable_codex_keeps_the_cursor_and_queue_for_retry(self):
+        self.dispatcher.run()
+        cursor = self.state()["cursor"]
+        self.host.fail_launch = "orca unavailable"
+        self.submit(LINK1, PR1)
+        queue = self.state()["queue"]
+        self.host.fail_launch = None
+        self.host.claude_limited = True
+        self.host.codex_error = poll.PollError("Claude and Codex are rate-limited")
+        self.time[0] += 60
+
+        self.assertEqual(self.dispatcher.run(), 1)
+        self.assertEqual(self.host.of("launch"), [])
+        self.assertEqual(self.state()["cursor"], cursor)
+        self.assertEqual(self.state()["queue"], queue)
+        self.assertEqual(self.events()[-1]["reason"], "Claude and Codex are rate-limited")
+
+        self.host.codex_error = None
+        self.assertEqual(self.dispatcher.run(), 0)
+        self.assertEqual(self.state()["queue"], [])
+        self.assertEqual(self.host.of("launch")[0][2:5], poll.CODEX_REVIEW)
 
     def test_poll_counts_only_the_search_it_asked_for(self):
         self.dispatcher.run()
@@ -615,6 +679,87 @@ class HostTests(unittest.TestCase):
             {"cwd": "/state", "input_text": "prompt", "timeout": poll.POLL_TIMEOUT_SECONDS, "env": {"A": "1"}},
         )
 
+    def test_codex_search_checks_usage_and_reads_every_page(self):
+        host = poll.Host()
+        arguments = poll.search_arguments(ME, 1793966000)
+        next_page = "For the next page of results use cursor `opaque-page-2`\n"
+        last_page = "End of results - No more pages available.\\n"
+
+        def page(rows, pagination):
+            return {
+                "isError": False,
+                "content": [{"text": json.dumps({"results": rows, "pagination_info": pagination})}],
+            }
+
+        rpc = unittest.mock.Mock(side_effect=[
+            {"ordinaryUsageAllowed": True},
+            {"thread": {"id": "thread-a"}},
+            page(f"Text: <@{ME}|Name> first", next_page),
+            page(f"Text: <@{ME}> second", last_page),
+        ])
+        with unittest.mock.patch.object(host, "codex_rpc", return_value=nullcontext(rpc)):
+            self.assertEqual(
+                host.codex_slack_results(arguments, ME, "/state"),
+                f"Text: <@{ME}|Name> first\n\nText: <@{ME}> second",
+            )
+        initial_search = rpc.call_args_list[2].args[1]
+        self.assertEqual(rpc.call_args_list[0].args, ("account/rateLimits/read",))
+        self.assertEqual(initial_search["tool"], poll.CODEX_SLACK_SEARCH_TOOL)
+        self.assertEqual(initial_search["arguments"]["after"], arguments["after"])
+        self.assertEqual(initial_search["arguments"]["keywords"], [f"<@{ME}>"])
+        self.assertEqual(rpc.call_args_list[3].args[1], {
+            **initial_search, "arguments": {**initial_search["arguments"], "cursor": "opaque-page-2"},
+        })
+
+        for response, error in (
+            ({"ordinaryUsageAllowed": False}, "Claude and Codex are rate-limited"),
+            ({}, "included usage could not be verified"),
+        ):
+            with self.subTest(response=response):
+                rpc = unittest.mock.Mock(return_value=response)
+                with unittest.mock.patch.object(host, "codex_rpc", return_value=nullcontext(rpc)):
+                    with self.assertRaisesRegex(poll.PollError, error):
+                        host.codex_slack_results(arguments, ME, "/state")
+                rpc.assert_called_once_with("account/rateLimits/read")
+
+        rpc = unittest.mock.Mock(side_effect=[
+            {"ordinaryUsageAllowed": True}, {"thread": {"id": "thread-a"}},
+            page("first", next_page), page("second", next_page),
+        ])
+        with unittest.mock.patch.object(host, "codex_rpc", return_value=nullcontext(rpc)):
+            with self.assertRaisesRegex(poll.PollError, "repeated a search cursor"):
+                host.codex_slack_results(arguments, ME, "/state")
+
+    def test_codex_formatter_has_no_connectors_or_shell_and_requires_success(self):
+        host = poll.Host()
+        arguments = poll.search_arguments(ME, 1793966000)
+        output = {"requests": []}
+        message = {"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(output)}}
+        completed = {"type": "turn.completed"}
+        quota_error = {"type": "turn.failed", "error": {"message": "usage limit reached [sentinel-secret]"}}
+        result = lambda code, *events: SimpleNamespace(
+            returncode=code, stdout="\n".join(map(json.dumps, events)), stderr="sentinel-secret",
+        )
+        with tempfile.TemporaryDirectory() as state, \
+                unittest.mock.patch.object(host, "codex_slack_results", return_value="untrusted Slack text"), \
+                unittest.mock.patch.object(host, "run", return_value=result(0, message, completed)) as run:
+            self.assertEqual(host.poll_codex("filter", arguments, ME, state), output)
+            command = run.call_args.args[0]
+            disabled = [command[i + 1] for i, value in enumerate(command) if value == "--disable"]
+            self.assertEqual(set(disabled), {"apps", "plugins", "hooks", "shell_tool"})
+            self.assertIn("--ignore-user-config", command)
+            self.assertIn(poll.CODEX_POLL_MODEL, command)
+            self.assertIn("untrusted Slack text", run.call_args.kwargs["input_text"])
+            run.return_value = result(1, quota_error)
+            with self.assertRaisesRegex(poll.PollError, "^Claude and Codex are rate-limited$"):
+                host.poll_codex("filter", arguments, ME, state)
+            run.return_value = result(1)
+            with self.assertRaisesRegex(poll.PollError, r"^Codex fallback poll failed \(exit code 1\)$"):
+                host.poll_codex("filter", arguments, ME, state)
+            run.return_value = result(0, message)
+            with self.assertRaises(poll.PollError):
+                host.poll_codex("filter", arguments, ME, state)
+
     def test_launch_runs_orca_in_the_review_directory_and_requires_a_delivered_prompt(self):
         host = poll.Host()
         launched = {
@@ -631,7 +776,7 @@ class HostTests(unittest.TestCase):
             run.call_args.args[0],
             [
                 ORCA, "agent", "launch", "--agent", "claude", "--model", "claude-opus-5-5", "--effort", "xhigh",
-                "--prompt", "Review x", "--json",
+                "--surface", "terminal", "--prompt", "Review x", "--json",
             ],
         )
         self.assertEqual(run.call_args.kwargs["cwd"], "/work")

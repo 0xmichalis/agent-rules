@@ -1,5 +1,5 @@
 [Unit]
-Description=Start Claude Code reviews for pull requests requested in Slack
+Description=Start Orca reviews for pull requests requested in Slack
 Documentation=https://github.com/0xmichalis/agent-rules/tree/main/automations/pr-review-poll
 ConditionPathExists=%h/.config/pr-review-poll/env
 

@@ -1,8 +1,8 @@
 # PR review poll
 
 Starts an agent review session in Orca when someone mentions you in Slack with a
-link to a pull request in your GitHub organization. Nobody has to create a Slack
-app: the poll uses your own claude.ai Slack connector.
+link to a pull request in your GitHub organization. The poll uses your connected
+Slack account.
 
 ## How it works
 
@@ -13,8 +13,7 @@ starts a run while the previous one is still going. Each run has three steps.
    it started. New commits, new comments from people or a new Slack request are
    sent to the session's agent as a message; a busy agent takes it after its
    current turn. When all of a session's pull requests have merged or closed,
-   its tab is closed. At most three agents review at once; queued requests start
-   when one finishes.
+   its tab is closed.
 2. Poll. A headless Claude Haiku session in restricted mode searches Slack for
    messages that mention you, starting 30 minutes before the last successful
    poll, because Slack search can return a message minutes after it was posted.
@@ -23,18 +22,25 @@ starts a run while the previous one is still going. Each run has three steps.
    pull request as structured output. It has no tool that runs commands, and it
    ignores your settings files. A run that did not make exactly the search it
    was given, or returned no structured output, counts as failed and leaves
-   that starting point alone.
+   that starting point alone. When Claude reports a rate limit, the script
+   checks Codex's included usage, searches Slack through the connected Codex
+   account, and uses GPT-6.1 Terra to extract the requests. The fallback model
+   receives search results as data with command tools and connectors disabled.
 3. Submit. The dispatcher validates the permalink, author and pull request URLs
    and ignores messages it has handled. It skips pull requests that are merged
    or closed, yours, opened from a fork or approved by you at the current head.
    It starts one agent per message with `orca agent launch`, as a tab named
    `review-<repo>-<number>` in the Orca workspace that contains `REVIEW_CWD`.
-   The agent's prompt contains only the validated URLs. If the agent cannot
-   start, for example because Orca is closed, the request is queued and retried.
+   The agent's prompt contains only the validated URLs. At most three agents
+   review at once. Queued requests get the first available slots. A failed
+   launch stays queued for retry.
 
 `REVIEW_AGENT`, `REVIEW_MODEL` and `REVIEW_EFFORT` choose the agent, which
-default to `claude`, `claude-opus-5-5` and `xhigh`. Orca starts the agent with
-the arguments from your Orca agent settings.
+default to `claude`, `claude-opus-5-5` and `xhigh`. While Claude is rate-limited,
+new and queued Claude reviews start in Codex with GPT-6.2 Sol at `xhigh`. The
+next successful Claude poll restores the configured reviewer. If both are
+rate-limited, the poll keeps its cursor and retries queued reviews on a later
+run. Review tabs use the terminal surface so the dispatcher can track them.
 
 Review sessions never approve. When a pull request is ready, the agent sends a
 push notification if it can and waits; open its tab in Orca and ask it to
@@ -44,8 +50,10 @@ approve.
 
 - Linux with a systemd user manager.
 - Orca running, with `REVIEW_CWD` inside one of its workspaces.
-- Claude Code signed in to a claude.ai account with the Slack connector
-  connected. The poll always uses Claude, whatever the review agent is.
+- Claude Code signed in to claude.ai with the Slack connector connected.
+- For fallback, Codex CLI signed in to a ChatGPT account with the Slack
+  connector connected to the same workspace and access to GPT-6.1 Terra and
+  GPT-6.2 Sol.
 - `gh` signed in with access to the organization.
 
 ## Set up
