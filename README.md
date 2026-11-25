@@ -78,6 +78,7 @@ After install, resolve those links under `~/.agents/agent-rules/`.
 | --- | --- |
 | Git history, review, or PR cleanup needs detail | [rules/git.md](rules/git.md) |
 | Operating services or writing a runbook | [rules/operations.md](rules/operations.md) |
+| Designing or changing runtime code | [rules/tiger-style.md](rules/tiger-style.md) |
 | Performance review | [rules/performance-scout.md](rules/performance-scout.md) |
 | Editing Rust | [rules/scoped/rust.md](rules/scoped/rust.md) |
 | Working on a Solana program | [rules/scoped/solana.md](rules/scoped/solana.md) |

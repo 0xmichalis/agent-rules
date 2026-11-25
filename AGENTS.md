@@ -15,6 +15,8 @@
 * Keep changes focused. Avoid speculative options, unrelated refactors and
   duplicate sources of truth. Clean up what your change makes unused. Touched
   comments explain current intent, not change history.
+* Apply [Tiger Style](rules/tiger-style.md) when designing or changing runtime
+  code. Bound work and resources, check invariants and keep control flow simple.
 * Verify consequential claims against the live system or a primary source:
   deployed revision, live config, logs, API schema, on-chain state, library
   source at the pinned version. Docs, UIs, memory and model answers are leads.
