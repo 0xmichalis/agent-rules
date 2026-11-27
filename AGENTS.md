@@ -24,8 +24,9 @@
   harmless probe; a UI or plan limit is not an API limit. Enumerate before
   saying "all" or "none". Trace bugs into upstream code. Settle reviewer
   objections with evidence; correct your own wrong claims explicitly.
-* Test changed behavior, including boundaries and failure paths, at the lowest
-  useful tier. Run the relevant checks; state what could not be verified.
+* Follow the [test pyramid](rules/testing.md). Cover changed behavior, including
+  boundaries and failure paths, at the lowest tier that can catch a regression.
+  Run the relevant checks and state what could not be verified.
   Don't invent tests for harmless documentation edits.
 * For substantial performance-critical code changes, the main agent runs a
   read-only [performance scout](rules/performance-scout.md) at a meaningful
